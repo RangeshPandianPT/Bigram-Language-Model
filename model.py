@@ -68,7 +68,7 @@ class CausalSelfAttention(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x, freqs_cos, freqs_sin):
+    def forward(self, x, freqs_cos, freqs_sin, past_kv=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -81,6 +81,14 @@ class CausalSelfAttention(nn.Module):
         # Apply RoPE
         q, k = apply_rotary_emb(q, k, freqs_cos, freqs_sin)
         
+        # KV Cache: Concatenate with past keys/values
+        if past_kv is not None:
+            past_k, past_v = past_kv
+            k = torch.cat((past_k, k), dim=2)
+            v = torch.cat((past_v, v), dim=2)
+            
+        present_kv = (k, v) # cache the keys/values for next step
+        
         # Transpose for attention: (B, nh, T, hs)
         k = k.transpose(1, 2) 
         q = q.transpose(1, 2)
@@ -88,7 +96,11 @@ class CausalSelfAttention(nn.Module):
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        
+        # Masking
+        if past_kv is None:
+            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+            
         att = F.softmax(att, dim=-1)
         att = self.dropout(att)
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
@@ -96,7 +108,7 @@ class CausalSelfAttention(nn.Module):
         
         # output projection
         y = self.resid_dropout(self.c_proj(y))
-        return y
+        return y, present_kv
 
 class FeedForward(nn.Module):
     """ SwiGLU FeedForward """
@@ -126,10 +138,11 @@ class Block(nn.Module):
         self.ln1 = RMSNorm(config.n_embd)
         self.ln2 = RMSNorm(config.n_embd)
 
-    def forward(self, x, freqs_cos, freqs_sin):
-        x = x + self.sa(self.ln1(x), freqs_cos, freqs_sin)
+    def forward(self, x, freqs_cos, freqs_sin, past_kv=None):
+        sa_out, present_kv = self.sa(self.ln1(x), freqs_cos, freqs_sin, past_kv)
+        x = x + sa_out
         x = x + self.ffwd(self.ln2(x))
-        return x
+        return x, present_kv
 
 class GPTLanguageModel(nn.Module):
     def __init__(self, config: GPTConfig):
@@ -147,18 +160,28 @@ class GPTLanguageModel(nn.Module):
         self.register_buffer("freqs_cos", freqs_cos)
         self.register_buffer("freqs_sin", freqs_sin)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, past_key_values=None):
         B, T = idx.shape
 
         # idx and targets are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(idx) # (B,T,C)
         x = tok_emb # (B,T,C)
         
-        freqs_cos = self.freqs_cos[:T]
-        freqs_sin = self.freqs_sin[:T]
+        # Calculate RoPE offset
+        if past_key_values is not None:
+             past_length = past_key_values[0][0].size(2)
+             start_pos = past_length
+        else:
+             start_pos = 0
+             
+        freqs_cos = self.freqs_cos[start_pos : start_pos + T]
+        freqs_sin = self.freqs_sin[start_pos : start_pos + T]
         
-        for block in self.blocks:
-            x = block(x, freqs_cos, freqs_sin)
+        present_key_values = []
+        for i, block in enumerate(self.blocks):
+            past_kv = past_key_values[i] if past_key_values is not None else None
+            x, present_kv = block(x, freqs_cos, freqs_sin, past_kv)
+            present_key_values.append(present_kv)
             
         x = self.ln_f(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
@@ -171,15 +194,24 @@ class GPTLanguageModel(nn.Module):
             targets = targets.view(B*T)
             loss = F.cross_entropy(logits, targets)
 
-        return logits, loss
+        return logits, loss, present_key_values
 
+    @torch.no_grad()
     def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
+        past_key_values = None
+        
         for _ in range(max_new_tokens):
-            # crop idx to the last block_size tokens
-            idx_cond = idx[:, -self.config.block_size:]
+            # If we have past_kv, we only need to pass the last token
+            if past_key_values is not None:
+                idx_cond = idx[:, -1:]
+            else:
+                # crop idx to the last block_size tokens (legacy behavior if no cache)
+                idx_cond = idx[:, -self.config.block_size:] 
+                
             # get the predictions
-            logits, loss = self(idx_cond)
+            logits, _, past_key_values = self(idx_cond, past_key_values=past_key_values)
+            
             # focus only on the last time step
             logits = logits[:, -1, :] # becomes (B, C)
             # apply softmax to get probabilities
