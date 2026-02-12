@@ -84,8 +84,8 @@ class CausalSelfAttention(nn.Module):
         # KV Cache: Concatenate with past keys/values
         if past_kv is not None:
             past_k, past_v = past_kv
-            k = torch.cat((past_k, k), dim=2)
-            v = torch.cat((past_v, v), dim=2)
+            k = torch.cat((past_k, k), dim=1)  # Concatenate on sequence dimension
+            v = torch.cat((past_v, v), dim=1)
             
         present_kv = (k, v) # cache the keys/values for next step
         
@@ -97,9 +97,17 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         
-        # Masking
+        # Masking - need to handle both cached and non-cached cases
+        # k has shape (B, nh, kv_len, hs) where kv_len = past_len + T
+        kv_len = k.size(2)
+        
         if past_kv is None:
+            # Standard causal masking for training
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        else:
+            # During generation with cache, we only compute attention for the new token
+            # The new query can attend to all previous keys (no masking needed since we're generating left-to-right)
+            pass
             
         att = F.softmax(att, dim=-1)
         att = self.dropout(att)
@@ -169,7 +177,7 @@ class GPTLanguageModel(nn.Module):
         
         # Calculate RoPE offset
         if past_key_values is not None:
-             past_length = past_key_values[0][0].size(2)
+             past_length = past_key_values[0][0].size(1)  # past_k shape: (B, past_len, n_head, head_dim)
              start_pos = past_length
         else:
              start_pos = 0
@@ -197,8 +205,18 @@ class GPTLanguageModel(nn.Module):
         return logits, loss, present_key_values
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens):
-        # idx is (B, T) array of indices in the current context
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=0, top_p=1.0, repetition_penalty=1.0):
+        """
+        Generate text with advanced sampling strategies.
+        
+        Args:
+            idx: (B, T) tensor of token indices
+            max_new_tokens: number of tokens to generate
+            temperature: sampling temperature (higher = more random)
+            top_k: if > 0, only sample from top k tokens
+            top_p: if < 1.0, nucleus sampling (sample from smallest set with cumulative prob >= p)
+            repetition_penalty: if > 1.0, penalize repeated tokens
+        """
         past_key_values = None
         
         for _ in range(max_new_tokens):
@@ -214,10 +232,39 @@ class GPTLanguageModel(nn.Module):
             
             # focus only on the last time step
             logits = logits[:, -1, :] # becomes (B, C)
-            # apply softmax to get probabilities
-            probs = F.softmax(logits, dim=-1) # (B, C)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
+            
+            # Apply repetition penalty
+            if repetition_penalty != 1.0:
+                for token_id in set(idx[0].tolist()):
+                    logits[0, token_id] /= repetition_penalty
+            
+            # Apply temperature
+            logits = logits / temperature
+            
+            # Apply top-k filtering
+            if top_k > 0:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf')
+            
+            # Apply top-p (nucleus) filtering
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                
+                # Remove tokens with cumulative probability above the threshold
+                sorted_indices_to_remove = cumulative_probs > top_p
+                # Shift the indices to the right to keep also the first token above the threshold
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                
+                # Scatter sorted tensors to original indexing
+                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                logits[indices_to_remove] = -float('Inf')
+            
+            # Sample from the filtered distribution
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
