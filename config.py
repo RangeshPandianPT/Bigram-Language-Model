@@ -10,6 +10,11 @@ class GPTConfig:
     n_embd: int = 128
     dropout: float = 0.2
     bias: bool = False # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better like Llama.
+    n_kv_head: int = None # None = n_head (MHA)
+    
+    def __post_init__(self):
+        if self.n_kv_head is None:
+            self.n_kv_head = self.n_head
 
 @dataclass
 class TrainConfig:

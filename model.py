@@ -50,17 +50,31 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cos: torch.Tensor
     
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    if n_rep == 1:
+        return x
+    B, T, n_kv_head, head_dim = x.shape
+    x = x[:, :, :, None, :].expand(B, T, n_kv_head, n_rep, head_dim)
+    return x.reshape(B, T, n_kv_head * n_rep, head_dim)
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.head_dim = config.n_embd // config.n_head
         self.n_head = config.n_head
+        self.n_kv_head = config.n_kv_head
         self.n_embd = config.n_embd
         self.block_size = config.block_size
         
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # Checking if GQA is valid
+        assert self.n_head % self.n_kv_head == 0, "n_head must be divisible by n_kv_head"
+        
+        self.q_proj = nn.Linear(config.n_embd, config.n_head * self.head_dim, bias=config.bias)
+        self.k_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
+        self.v_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
+        self.c_proj = nn.Linear(config.n_head * self.head_dim, config.n_embd, bias=config.bias)
         
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                     .view(1, 1, config.block_size, config.block_size))
@@ -71,14 +85,16 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x, freqs_cos, freqs_sin, past_kv=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+        # calculate query, key, values
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
         
-        k = k.view(B, T, self.n_head, self.head_dim) # (B, T, nh, hs)
         q = q.view(B, T, self.n_head, self.head_dim) # (B, T, nh, hs)
-        v = v.view(B, T, self.n_head, self.head_dim) # (B, T, nh, hs)
+        k = k.view(B, T, self.n_kv_head, self.head_dim) # (B, T, n_kv, hs)
+        v = v.view(B, T, self.n_kv_head, self.head_dim) # (B, T, n_kv, hs)
 
-        # Apply RoPE
+        # Apply RoPE (only to q and k)
         q, k = apply_rotary_emb(q, k, freqs_cos, freqs_sin)
         
         # KV Cache: Concatenate with past keys/values
@@ -89,6 +105,11 @@ class CausalSelfAttention(nn.Module):
             
         present_kv = (k, v) # cache the keys/values for next step
         
+        # GQA: Repeat K/V heads to match Q heads
+        # This is where GQA happens. If n_kv_head < n_head, we repeat the efficient K/V heads
+        k = repeat_kv(k, self.n_head // self.n_kv_head)
+        v = repeat_kv(v, self.n_head // self.n_kv_head)
+        
         # Transpose for attention: (B, nh, T, hs)
         k = k.transpose(1, 2) 
         q = q.transpose(1, 2)
@@ -98,9 +119,6 @@ class CausalSelfAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         
         # Masking - need to handle both cached and non-cached cases
-        # k has shape (B, nh, kv_len, hs) where kv_len = past_len + T
-        kv_len = k.size(2)
-        
         if past_kv is None:
             # Standard causal masking for training
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))

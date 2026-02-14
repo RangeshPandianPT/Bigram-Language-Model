@@ -113,4 +113,48 @@ for cfg in configs:
                         top_p=cfg['top_p'])
     print(f"  {cfg['name']:12s}: {tokenizer.decode(out[0].tolist()[:30])}")
 
+
 print("\n✓ All tests passed!")
+
+
+print("\n" + "=" * 80)
+print("TESTING GROUPED QUERY ATTENTION (GQA)")
+print("=" * 80)
+
+# Initialize model with GQA
+gqa_config = GPTConfig()
+gqa_config.n_head = 4
+gqa_config.n_kv_head = 2 # 2 query heads per 1 KV head
+gqa_config.n_embd = 128
+# head_dim = 32
+# q_proj = 128 -> 4*32 = 128
+# k_proj = 128 -> 2*32 = 64
+# v_proj = 128 -> 2*32 = 64
+
+print(f"Initializing GQA model with n_head={gqa_config.n_head}, n_kv_head={gqa_config.n_kv_head}...")
+gqa_model = GPTLanguageModel(gqa_config)
+gqa_model.to(train_config.device)
+
+# Check parameter shapes
+print("\nChecking parameter shapes:")
+for name, param in gqa_model.named_parameters():
+    if 'c_attn' in name: # Should not exist anymore
+        print(f"ERROR: Found 'c_attn' in {name}, refactoring failed?")
+    if 'q_proj' in name and 'weight' in name:
+        print(f"  {name}: {param.shape} (Expected: {gqa_config.n_head * (gqa_config.n_embd//gqa_config.n_head)}, {gqa_config.n_embd})")
+    if 'k_proj' in name and 'weight' in name:
+        print(f"  {name}: {param.shape} (Expected: {gqa_config.n_kv_head * (gqa_config.n_embd//gqa_config.n_head)}, {gqa_config.n_embd})")
+
+# Run forward pass
+print("\nRunning forward pass with GQA...")
+x = torch.randint(0, gqa_config.vocab_size, (2, 64)).to(train_config.device)
+try:
+    logits, loss, _ = gqa_model(x)
+    print(f"Forward pass successful. Logits shape: {logits.shape}")
+    assert logits.shape == (2, 64, gqa_config.vocab_size)
+    print("✓ GQA Test Passed!")
+except Exception as e:
+    print(f"❌ GQA Test Failed: {e}")
+    import traceback
+    traceback.print_exc()
+
