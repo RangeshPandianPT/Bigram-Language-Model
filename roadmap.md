@@ -18,9 +18,9 @@ Modern LLMs have moved away from the original GPT-2 architecture in several ways
 **Why:** Replaces ReLU or GeLU. It consistently yields better performance for the same compute budget.
 **Status:** ✅ Implemented in `FeedForward` module
 
-### 4. Grouped Query Attention (GQA) 🔄 TODO
+### 4. Grouped Query Attention (GQA) ✅
 **Why:** Reduces memory bandwidth usage during inference. It's a middle ground between Multi-Head (MHA) and Multi-Query (MQA).
-**Task:** Modify `MultiHeadAttention` to share keys and values across multiple heads.
+**Status:** ✅ Activated with `n_kv_head=2` — 4 query heads share 2 KV heads (50% KV memory reduction). Verified by `test_gqa.py`.
 
 ---
 

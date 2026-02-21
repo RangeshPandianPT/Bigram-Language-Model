@@ -10,11 +10,13 @@ class GPTConfig:
     n_embd: int = 128
     dropout: float = 0.2
     bias: bool = False # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better like Llama.
-    n_kv_head: int = None # None = n_head (MHA)
+    n_kv_head: int = 2  # GQA: 2 KV heads shared across 4 query heads (saves 50% KV memory)
     
     def __post_init__(self):
         if self.n_kv_head is None:
             self.n_kv_head = self.n_head
+        assert self.n_head % self.n_kv_head == 0, \
+            f"n_head ({self.n_head}) must be divisible by n_kv_head ({self.n_kv_head})"
 
 @dataclass
 class TrainConfig:
