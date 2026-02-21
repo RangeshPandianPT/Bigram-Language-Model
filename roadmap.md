@@ -72,14 +72,13 @@ Making the model generate text faster and smarter.
 
 ## 🚀 Next Steps: Scaling Up
 
-### 1. Train Larger Model
-- Increase model size: `n_layer=8`, `n_embd=256`, `n_head=8`
-- Train for longer: `max_iters=5000+`
-- Use larger dataset (OpenWebText, C4)
+### 1. Train Larger Model ✅
+- Scaled to: `n_layer=8`, `n_embd=256`, `n_head=8`, `n_kv_head=4`, `block_size=128`
+- Training config: `max_iters=5000`, `batch_size=32`, `warmup_iters=200`
 
-### 2. Implement GQA (Grouped Query Attention)
-- Reduce KV cache memory usage
-- Better scaling for larger models
+### 2. Implement GQA (Grouped Query Attention) ✅
+- Activated with `n_kv_head=4` (50% KV memory reduction)
+- Verified by `test_gqa.py`
 
 ### 3. Advanced Features
 - Flash Attention for faster training
