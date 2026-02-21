@@ -23,43 +23,67 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 - Uses a custom BPE (Byte Pair Encoding) tokenizer trained on the dataset.
 
 ## 📂 File Structure
-- `model.py`: The core Transformer architecture (RMSNorm, RoPE, CausalSelfAttention with GQA, SwiGLU).
-- `train.py`: Training loop with learning rate scheduling, gradient clipping, and AMP.
-- `config.py`: Configuration classes for Model, Training, and Sampling.
-- `generate.py`: Inference script with advanced sampling (Top-k, Top-p, Temperature).
-- `prepare_data.py`: Tokenizes raw text into binary `.bin` files for training.
-- `investigate_leakage.py`: Utility to check for data leakage between train/val splits.
+
+| File | Purpose |
+| --- | --- |
+| `model.py` | Core Transformer: RMSNorm, RoPE, GQA, SwiGLU, KV Cache |
+| `train.py` | Training loop with AMP, LR scheduling, gradient clipping |
+| `config.py` | GPTConfig, TrainConfig, SamplingConfig dataclasses |
+| `generate.py` | CLI inference with advanced sampling |
+| `app.py` | 🌐 Gradio web demo |
+| `tokenizer.py` | BPE tokenizer wrapper |
+| `prepare_data.py` | Tokenizes raw text → `train.bin` / `val.bin` |
+| `test_gqa.py` | GQA unit tests (KV param reduction + output shape) |
 
 ## ⚡ Quick Start
 
-### 1. Prepare Data
-Put your text data in `input.txt` and run:
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Prepare Data
 ```bash
 python prepare_data.py
 ```
-This will create `train.bin` and `val.bin`.
 
-### 2. Train
+### 3. Train
 ```bash
 python train.py
 ```
-Adjust parameters in `config.py` or directly in `train.py`.
 
-### 3. Generate Text
+### 4. Generate Text (CLI)
 ```bash
 python generate.py
 ```
 
-## 🧪 Testing
-Run the feature verification suite:
+## 🌐 Web Demo
+
+Launch an interactive web interface to generate text with live parameter controls:
+
 ```bash
-python test_new_features.py
+python app.py
 ```
-This tests:
-- GQA forward pass dimensions
-- Mixed precision training
-- Learning rate scheduler
-- Sampling strategies
+
+Then open [http://localhost:7860](http://localhost:7860) in your browser.
+
+**Demo controls:**
+
+| Control | Description |
+| --- | --- |
+| 🌡️ Temperature | Creativity/randomness (0.1 = focused, 2.0 = wild) |
+| 🔝 Top-K | Keep only the top K most likely tokens |
+| 🎯 Top-P | Nucleus sampling — smallest set with cumulative prob ≥ P |
+| 🔁 Repetition Penalty | Discourages repeating tokens |
+| 📏 Max New Tokens | How many tokens to generate |
+
+## 🧪 Testing
+
+```bash
+python test_gqa.py        # GQA correctness: KV param reduction + output shape
+python test_kv_cache.py   # KV Cache: verify cached == uncached outputs + speedup
+python test_new_features.py  # Mixed precision, sampling strategies, LR scheduler
+```
 
 ## 📜 License
 MIT
