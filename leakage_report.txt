@@ -1,0 +1,5 @@
+Total characters: 1115394
+Train size: 1003854
+Val size: 111540
+Validation set is NOT exactly present in the training set.
+The first 1000 characters of validation set do NOT appear in the training set.

@@ -81,7 +81,7 @@ Making the model generate text faster and smarter.
 - Verified by `test_gqa.py`
 
 ### 3. Advanced Features
-- Flash Attention for faster training
+- ✅ Flash Attention implementation using PyTorch SDPA (faster memory-efficient attention computation)
 - Model parallelism for multi-GPU training
 - Quantization for deployment
 

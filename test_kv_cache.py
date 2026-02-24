@@ -10,7 +10,7 @@ def test_kv_cache():
     torch.manual_seed(1337)
     
     # Tiny model for fast testing
-    config = GPTConfig(block_size=64, n_layer=2, n_head=2, n_embd=32, vocab_size=100)
+    config = GPTConfig(block_size=64, n_layer=2, n_head=2, n_kv_head=2, n_embd=32, vocab_size=100)
     model = GPTLanguageModel(config).to(device)
     model.eval()
 

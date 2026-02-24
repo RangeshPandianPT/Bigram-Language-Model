@@ -115,21 +115,26 @@ class CausalSelfAttention(nn.Module):
         q = q.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        
-        # Masking - need to handle both cached and non-cached cases
+        # causal self-attention
+        # Flash Attention using PyTorch 2.0 SDPA
         if past_kv is None:
-            # Standard causal masking for training
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+            # Standard causal masking for training/prefill
+            y = F.scaled_dot_product_attention(
+                q, k, v, 
+                attn_mask=None, 
+                dropout_p=self.dropout.p if self.training else 0.0, 
+                is_causal=True
+            )
         else:
-            # During generation with cache, we only compute attention for the new token
-            # The new query can attend to all previous keys (no masking needed since we're generating left-to-right)
-            pass
+            # During generation with cache, query shape is (B, nh, 1, hs), we attend to all keys (B, nh, T_past+1, hs)
+            # No causal mask needed as we just want the output for the 1 new token attending to everything before and including it
+            y = F.scaled_dot_product_attention(
+                q, k, v, 
+                attn_mask=None, 
+                dropout_p=self.dropout.p if self.training else 0.0, 
+                is_causal=False
+            )
             
-        att = F.softmax(att, dim=-1)
-        att = self.dropout(att)
-        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         
         # output projection
