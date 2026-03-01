@@ -82,6 +82,6 @@ Making the model generate text faster and smarter.
 
 ### 3. Advanced Features
 - ✅ Flash Attention implementation using PyTorch SDPA (faster memory-efficient attention computation)
-- Model parallelism for multi-GPU training
-- Quantization for deployment
+- ✅ Model parallelism for multi-GPU training
+- ✅ Quantization for deployment
 

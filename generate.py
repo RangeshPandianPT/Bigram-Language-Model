@@ -23,6 +23,16 @@ def generate(args):
     model.to(train_config.device)
     model.eval()
     
+    if args.quantize:
+        print("Applying dynamic quantization to int8...")
+        if train_config.device == 'cuda':
+            print("Warning: Dynamic Quantization is optimized for CPU inference. Moving model to CPU.")
+            model.to('cpu')
+            train_config.device = 'cpu'
+        model = torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+    
     print(f"Model loaded from {model_path}")
     print(f"Sampling config: temperature={args.temperature}, top_k={args.top_k}, top_p={args.top_p}, repetition_penalty={args.repetition_penalty}")
     
@@ -57,6 +67,7 @@ if __name__ == "__main__":
     parser.add_argument('--top_k', type=int, default=0, help='Top-k sampling (0 = disabled)')
     parser.add_argument('--top_p', type=float, default=1.0, help='Nucleus sampling (1.0 = disabled)')
     parser.add_argument('--repetition_penalty', type=float, default=1.0, help='Repetition penalty (1.0 = no penalty)')
+    parser.add_argument('--quantize', action='store_true', help='Apply dynamic quantization (int8) for faster CPU inference')
     
     args = parser.parse_args()
     generate(args)

@@ -72,6 +72,11 @@ def train():
     
     # Initialize model
     model = GPTLanguageModel(gpt_config)
+    
+    if torch.cuda.device_count() > 1:
+        print(f"Let's use {torch.cuda.device_count()} GPUs!")
+        model = nn.DataParallel(model)
+        
     model.to(train_config.device)
     
     # Optimizer with weight decay
@@ -105,7 +110,8 @@ def train():
             # Save best model
             if losses['val'] < best_val_loss:
                 best_val_loss = losses['val']
-                torch.save(model.state_dict(), 'model_best.pth')
+                model_to_save = model.module if hasattr(model, 'module') else model
+                torch.save(model_to_save.state_dict(), 'model_best.pth')
                 print(f"Saved best model with val loss {best_val_loss:.4f}")
         
         # Sample a batch of data
@@ -132,7 +138,8 @@ def train():
         scaler.update()
     
     # Save final model
-    torch.save(model.state_dict(), 'model.pth')
+    model_to_save = model.module if hasattr(model, 'module') else model
+    torch.save(model_to_save.state_dict(), 'model.pth')
     print("Training complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
 
