@@ -13,6 +13,11 @@ class GPTConfig:
     bias: bool = False
     n_kv_head: int = 4            # GQA: 4 KV heads for 8 query heads (50% KV saving)
 
+    # LoRA Config
+    lora_rank: int = 0            # 0 = LoRA disabled. >0 = LoRA enabled
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+
     def __post_init__(self):
         if self.n_kv_head is None:
             self.n_kv_head = self.n_head

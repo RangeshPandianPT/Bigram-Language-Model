@@ -4,6 +4,15 @@ numpy
 
 # Web demo
 gradio>=4.0.0
+streamlit
+fastapi
+uvicorn
+pydantic
+requests
 
 # Tokenizer
 sentencepiece
+
+# Edge Deployment
+onnx
+onnxruntime

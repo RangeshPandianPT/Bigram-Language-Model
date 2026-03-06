@@ -22,6 +22,9 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 ### 🧠 Tokenization
 - Uses a custom BPE (Byte Pair Encoding) tokenizer trained on the dataset.
 
+### 🚀 Fine-Tuning & Deployment
+- **LoRA (Low-Rank Adaptation)**: Parameter-efficient fine-tuning script (`train_lora.py`) freezing base weights and injecting rank-decomposed matrices.
+- **ONNX Export**: Script (`export_onnx.py`) to export the PyTorch model for efficient cross-platform and edge device inference.
 ## 📂 File Structure
 
 | File | Purpose |

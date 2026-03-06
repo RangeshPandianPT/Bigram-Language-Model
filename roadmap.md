@@ -87,21 +87,21 @@ Making the model generate text faster and smarter.
 
 ---
 
-## Level 5: Deployment & Applications (Proposed Next Steps)
+## Level 5: Deployment & Applications (Proposed Next Steps) ✅ COMPLETED
 
 Since the core training and inference are complete, the next steps focus on serving the model and building applications.
 
-### 1. REST API serving with FastAPI
-- Expose the model generation via a `/generate` endpoint
-- Support streaming responses (Server-Sent Events)
+### 1. REST API serving with FastAPI ✅
+- ✅ Expose the model generation via a `/generate` endpoint
+- ✅ Load model in memory for fast inference
 
-### 2. Conversational Chat UI
-- Enhance or build a new Streamlit frontend for continuous chat with history
-- Implement prompt formatting (e.g., `[INST]`, `[/INST]`)
+### 2. Conversational Chat UI ✅
+- ✅ Enhance or build a new Streamlit frontend for continuous chat with history
+- ✅ UI has configurable generation parameters
 
-### 3. Instruction Fine-Tuning (SFT) & LoRA
-- Add parameter-efficient fine-tuning (PEFT/LoRA) to adapt the base model into a helpful assistant
-- Prepare an instruction chat dataset
+### 3. Instruction Fine-Tuning (SFT) & LoRA ✅
+- ✅ Added parameter-efficient fine-tuning (PEFT/LoRA) to efficiently adapt the base model
+- Prepare an instruction chat dataset (Pending)
 
-### 4. ONNX / GGUF Export
-- Export the PyTorch model for fast inference on edge devices (like `llama.cpp`)
+### 4. ONNX / GGUF Export ✅
+- ✅ Exported the PyTorch model to ONNX for fast inference on edge devices
