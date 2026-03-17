@@ -1,613 +1,602 @@
 """
-generate_report.py
-Generates a detailed PDF project report for the LLM project.
-Run: python generate_report.py  ->  project_report.pdf
+Automated evaluation scorecard for model variants.
+
+Usage examples:
+  python generate_report.py
+  python generate_report.py --compare base lora onnx --max-new-tokens 120
+  python generate_report.py --temperature 0.8 --top-k 50 --top-p 0.9
 """
-from fpdf import FPDF
+
+from __future__ import annotations
+
+import argparse
+import math
 import os
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable, Dict, List, Tuple
 
-FONT_DIR = "C:/Windows/Fonts"
-
-DARK_BG  = (15,  23,  42)
-HEADING  = (79,  70, 229)
-ACCENT   = (16, 185, 129)
-LIGHT_BG = (241, 245, 249)
-TEXT     = (30,  41,  59)
-WHITE    = (255, 255, 255)
-BOX_L    = (224, 231, 255)
-BOX_DARK = (67,  56, 202)
-
-# ─────────────────────────────────────────────
-class PDF(FPDF):
-
-    def setup_fonts(self):
-        self.add_font("Arial",   "",  f"{FONT_DIR}/arial.ttf",   uni=True)
-        self.add_font("Arial",   "B", f"{FONT_DIR}/arialbd.ttf", uni=True)
-        self.add_font("Arial",   "I", f"{FONT_DIR}/ariali.ttf",  uni=True)
-        self.add_font("Courier", "",  f"{FONT_DIR}/cour.ttf",    uni=True)
-        self.add_font("Courier", "B", f"{FONT_DIR}/courbd.ttf",  uni=True)
-
-    def header(self):
-        if self.page_no() == 1:
-            return
-        self.set_fill_color(*DARK_BG)
-        self.rect(0, 0, 210, 11, "F")
-        self.set_font("Arial", "B", 8)
-        self.set_text_color(*HEADING)
-        self.set_xy(10, 3)
-        self.cell(0, 5, "LLaMA-from-Scratch  |  Project Report  |  2026", align="L")
-        self.set_text_color(*WHITE)
-        self.set_xy(-30, 3)
-        self.cell(20, 5, f"Page {self.page_no()}", align="R")
-
-    def footer(self):
-        if self.page_no() == 1:
-            return
-        self.set_y(-11)
-        self.set_font("Arial", "", 7)
-        self.set_text_color(150, 150, 170)
-        self.cell(0, 5, "github.com/RangeshPandianPT/Bigram-Language-Model", align="C")
-
-    # ── helpers ────────────────────────────────────────────────────────────────
-
-    def sec(self, num, title):
-        self.ln(4)
-        self.set_fill_color(*HEADING)
-        self.set_text_color(*WHITE)
-        self.set_font("Arial", "B", 13)
-        self.cell(0, 9, f"  {num}  {title}", ln=True, fill=True)
-        self.ln(3)
-        self.set_text_color(*TEXT)
-
-    def sub(self, title):
-        self.set_font("Arial", "B", 10.5)
-        self.set_text_color(*BOX_DARK)
-        self.cell(0, 7, title, ln=True)
-        self.set_text_color(*TEXT)
-
-    def body(self, text):
-        self.set_font("Arial", "", 10)
-        self.set_text_color(*TEXT)
-        self.multi_cell(0, 5.5, text)
-        self.ln(2)
-
-    def bullet(self, items, indent=8):
-        self.set_font("Arial", "", 10)
-        self.set_text_color(*TEXT)
-        for item in items:
-            self.set_x(self.l_margin + indent)
-            self.multi_cell(0, 5.5, f"\u2022  {item}", new_x="LMARGIN")
-        self.ln(1)
-
-    def info_box(self, lines):
-        lh = 5.5
-        pad = 4
-        h = len(lines) * lh + pad * 2
-        x, y = self.get_x(), self.get_y()
-        w = self.w - self.l_margin - self.r_margin
-        self.set_fill_color(*BOX_L)
-        self.set_draw_color(*BOX_DARK)
-        self.rect(x, y, w, h, "FD")
-        self.set_xy(x + pad, y + pad)
-        self.set_font("Arial", "", 9.5)
-        self.set_text_color(*BOX_DARK)
-        for line in lines:
-            self.set_x(x + pad)
-            self.cell(0, lh, line, ln=True)
-        self.ln(4)
-        self.set_text_color(*TEXT)
-
-    def code_box(self, lines):
-        lh = 5
-        pad = 4
-        h = len(lines) * lh + pad * 2
-        x, y = self.get_x(), self.get_y()
-        w = self.w - self.l_margin - self.r_margin
-        self.set_fill_color(30, 41, 59)
-        self.set_draw_color(99, 102, 241)
-        self.rect(x, y, w, h, "FD")
-        self.set_xy(x + pad, y + pad)
-        self.set_font("Courier", "", 8.5)
-        self.set_text_color(167, 243, 208)
-        for line in lines:
-            self.set_x(x + pad)
-            self.cell(0, lh, line, ln=True)
-        self.ln(5)
-        self.set_text_color(*TEXT)
-
-    def table(self, rows, c1=70):
-        w2 = self.w - self.l_margin - self.r_margin - c1
-        # Header
-        self.set_fill_color(*HEADING)
-        self.set_text_color(*WHITE)
-        self.set_font("Arial", "B", 9.5)
-        self.cell(c1, 7, f"  {rows[0][0]}", border=1, fill=True)
-        self.cell(w2, 7, f"  {rows[0][1]}", border=1, fill=True, ln=True)
-        # Rows
-        for i, (a, b) in enumerate(rows[1:]):
-            self.set_fill_color(*(LIGHT_BG if i % 2 == 0 else WHITE))
-            self.set_text_color(*TEXT)
-            self.set_font("Arial", "", 9.5)
-            self.cell(c1, 6.5, f"  {a}", border=1, fill=True)
-            self.cell(w2, 6.5, f"  {b}", border=1, fill=True, ln=True)
-        self.ln(5)
-
-    def commit_badge(self, hash_, msg):
-        self.set_fill_color(*ACCENT)
-        self.set_text_color(*WHITE)
-        self.set_font("Courier", "B", 9)
-        self.cell(24, 7, f" {hash_}", fill=True)
-        self.set_fill_color(*DARK_BG)
-        self.set_font("Arial", "B", 9)
-        self.cell(0, 7, f"  {msg}", fill=True, ln=True)
-        self.ln(2)
-        self.set_text_color(*TEXT)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# BUILD
-# ═══════════════════════════════════════════════════════════════════════════════
-pdf = PDF()
-pdf.setup_fonts()
-pdf.set_margins(18, 18, 18)
-pdf.set_auto_page_break(True, margin=18)
-
-# ──────────────── PAGE 1: COVER ───────────────────────────────────────────────
-pdf.add_page()
-pdf.set_fill_color(*DARK_BG)
-pdf.rect(0, 0, 210, 297, "F")
-
-# Accent stripe
-pdf.set_fill_color(*HEADING)
-pdf.rect(0, 78, 210, 3, "F")
-pdf.rect(0, 200, 210, 3, "F")
-
-# Title
-pdf.set_xy(0, 92)
-pdf.set_font("Arial", "B", 30)
-pdf.set_text_color(*WHITE)
-pdf.cell(0, 13, "LLaMA-from-Scratch", align="C", ln=True)
-
-pdf.set_font("Arial", "I", 13)
-pdf.set_text_color(*HEADING)
-pdf.cell(0, 8, "Building a Modern LLM from the Ground Up in PyTorch", align="C", ln=True)
-
-pdf.ln(6)
-pdf.set_font("Arial", "", 10)
-pdf.set_text_color(148, 163, 184)
-pdf.cell(0, 6, "Full Project Report  |  February 2026", align="C", ln=True)
-
-# Stats boxes
-box_w = (210 - 36) / 4
-pdf.set_xy(18, 150)
-for val, label in [("6.03 M", "Parameters"), ("4", "Phases"), ("3", "Commits"), ("5+", "Key Features")]:
-    bx = pdf.get_x()
-    by = pdf.get_y()
-    pdf.set_fill_color(30, 41, 80)
-    pdf.rect(bx, by, box_w - 3, 22, "F")
-    pdf.set_font("Arial", "B", 17)
-    pdf.set_text_color(*ACCENT)
-    pdf.set_xy(bx + 2, by + 3)
-    pdf.cell(box_w - 7, 8, val, align="C")
-    pdf.set_font("Arial", "", 8)
-    pdf.set_text_color(148, 163, 184)
-    pdf.set_xy(bx + 2, by + 12)
-    pdf.cell(box_w - 7, 6, label, align="C")
-    pdf.set_xy(bx + box_w, 150)
-
-# Link & Author
-pdf.set_xy(0, 215)
-pdf.set_font("Arial", "", 10)
-pdf.set_text_color(*ACCENT)
-pdf.cell(0, 7, "github.com/RangeshPandianPT/Bigram-Language-Model", align="C", ln=True)
-
-pdf.set_xy(0, 269)
-pdf.set_font("Arial", "B", 12)
-pdf.set_text_color(*WHITE)
-pdf.cell(0, 7, "Rangesh Pandian P T", align="C", ln=True)
-pdf.set_font("Arial", "", 9)
-pdf.set_text_color(148, 163, 184)
-pdf.cell(0, 6, "AI Engineer  |  Deep Learning", align="C", ln=True)
-
-
-# ──────────────── PAGE 2: OVERVIEW ────────────────────────────────────────────
-pdf.add_page()
-pdf.ln(4)
-
-pdf.sec("1", "Project Overview")
-pdf.body(
-    "This project is a complete, educational implementation of a modern Large Language Model (LLM) "
-    "built entirely from scratch using PyTorch. Starting from a minimal 'Bigram' model that could "
-    "only guess the next character, the project was systematically evolved into a production-grade "
-    "'LLaMA-style' Transformer -- the same family of architecture used by Meta's LLaMA 2 and LLaMA 3."
-)
-pdf.body(
-    "Every component was built manually so each concept could be deeply understood: tokenization, "
-    "attention mechanisms, positional encodings, normalisation, activation functions, and efficient "
-    "inference. The result is a fully functional 6-million-parameter language model capable of "
-    "generating coherent Shakespeare-style text."
-)
-pdf.info_box([
-    "  Project Name  :  LLaMA-from-Scratch (Bigram Language Model)",
-    "  Language       :  Python 3.11  +  PyTorch 2.x",
-    "  Hardware       :  CUDA GPU (NVIDIA)",
-    "  Dataset        :  Shakespeare corpus (~1 MB plain text)",
-    "  Repository     :  github.com/RangeshPandianPT/Bigram-Language-Model",
-])
-
-pdf.sec("2", "Evolution: From Bigram to LLaMA")
-pdf.body(
-    "The project followed a 4-phase roadmap with each phase adding a distinct layer of capability:"
-)
-pdf.table([
-    ("Phase", "Goal & Status"),
-    ("1. Architecture",  "RMSNorm, RoPE, SwiGLU, GQA  [DONE]"),
-    ("2. Engineering",   "Modular codebase, BPE tokenizer, memmap, AMP  [DONE]"),
-    ("3. Inference",     "KV Cache, Temperature / Top-K / Top-P / Rep Penalty  [DONE]"),
-    ("4. Training",      "LR scheduling, Grad clipping, AdamW, Checkpointing  [DONE]"),
-], c1=45)
-
-
-# ──────────────── PAGE 3: ARCHITECTURE ────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("3", "Model Architecture")
-pdf.body(
-    "The model is a decoder-only Transformer (GPT-style) with LLaMA 2/3 improvements. "
-    "Each component is described below."
-)
-
-pdf.sub("3.1  RMSNorm  (Root Mean Square Normalisation)")
-pdf.body(
-    "LLaMA replaces LayerNorm with RMSNorm -- simpler, faster, and more numerically stable. "
-    "It normalises activations by their root-mean-square rather than full mean and variance, "
-    "eliminating the mean-centering step."
-)
-pdf.code_box([
-    "def _norm(self, x):",
-    "    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)",
-])
-
-pdf.sub("3.2  Rotary Positional Embeddings (RoPE)")
-pdf.body(
-    "Instead of adding fixed positional embeddings to tokens, RoPE encodes position by rotating "
-    "the query and key vectors in attention. This allows generalisation to longer sequences than "
-    "the model was trained on."
-)
-pdf.bullet([
-    "Frequencies precomputed once as cos/sin tables for speed",
-    "Applied directly to Q and K before the attention dot-product",
-    "Works seamlessly with KV Cache (offset handled automatically)",
-])
-
-pdf.sub("3.3  SwiGLU Activation (FeedForward Network)")
-pdf.body(
-    "The FeedForward block replaces ReLU/GELU with SwiGLU: a gated linear unit using the SiLU "
-    "activation function. This consistently gives better performance for the same compute."
-)
-pdf.code_box([
-    "# SwiGLU: gate the hidden state before projecting back",
-    "def forward(self, x):",
-    "    return self.w3(F.silu(self.w1(x)) * self.w2(x))",
-])
-
-pdf.sub("3.4  Grouped Query Attention (GQA)")
-pdf.body(
-    "Standard MHA has one KV head per query head, which is memory-expensive. GQA shares KV heads "
-    "across multiple query heads, cutting KV memory by 50% with minimal quality loss."
-)
-pdf.table([
-    ("Property", "MHA  vs  GQA (current config)"),
-    ("Query heads",    "8  |  8  (same)"),
-    ("KV heads",       "8  |  4  (half)"),
-    ("KV parameters",  "16,384  |  8,192  (-50%)"),
-    ("Memory savings", "--  |  50% KV cache reduction"),
-], c1=55)
-
-pdf.sub("3.5  Current Model Configuration")
-pdf.table([
-    ("Parameter", "Value"),
-    ("n_layer",     "8  (Transformer blocks)"),
-    ("n_embd",      "256  (embedding dimension)"),
-    ("n_head",      "8  (query attention heads)"),
-    ("n_kv_head",   "4  (GQA key-value heads)"),
-    ("block_size",  "128  (context window length)"),
-    ("vocab_size",  "~512  (BPE vocabulary)"),
-    ("Total params","6.03 Million"),
-], c1=50)
-
-
-# ──────────────── PAGE 4: ENGINEERING ─────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("4", "Engineering & Codebase")
-pdf.body(
-    "A clean, modular file structure means each concern is isolated and easy to modify:"
-)
-pdf.table([
-    ("File", "Responsibility"),
-    ("model.py",            "Full transformer: RMSNorm, RoPE, GQA, SwiGLU, KV Cache"),
-    ("train.py",            "Training loop, AMP, LR scheduler, gradient clipping"),
-    ("config.py",           "GPTConfig, TrainConfig, SamplingConfig dataclasses"),
-    ("tokenizer.py",        "BPE tokenizer wrapper (load / encode / decode)"),
-    ("generate.py",         "CLI text generation with all sampling strategies"),
-    ("app.py",              "Interactive Gradio web demo (GPU-accelerated)"),
-    ("prepare_data.py",     "Tokenise input.txt -> train.bin / val.bin"),
-    ("train_tokenizer.py",  "Train the BPE tokenizer on the corpus"),
-    ("test_gqa.py",         "Unit tests: GQA KV param count, output shapes"),
-    ("test_kv_cache.py",    "Benchmark: cached vs uncached generation speed"),
-], c1=55)
-
-pdf.sub("4.1  BPE Tokenizer")
-pdf.body(
-    "Instead of character-level tokenisation, the model uses Byte Pair Encoding (BPE) -- the same "
-    "technique as GPT-2/3/4. The tokenizer is trained on the Shakespeare corpus (vocab ~512), "
-    "then saved as bpe.model for reuse."
-)
-
-pdf.sub("4.2  Efficient Data Loading (numpy.memmap)")
-pdf.body(
-    "The corpus is pre-tokenised once into binary .bin files. numpy.memmap lets the training loop "
-    "read random chunks directly from disk without loading the entire file into RAM -- essential "
-    "for large datasets."
-)
-
-pdf.sub("4.3  Mixed Precision Training (AMP)")
-pdf.body(
-    "torch.cuda.amp.autocast() and GradScaler enable float-16 computation on the GPU, giving "
-    "2 to 3x training speed improvement on modern NVIDIA GPUs with no reduction in quality."
-)
-pdf.code_box([
-    "scaler = torch.cuda.amp.GradScaler(enabled=train_config.use_amp)",
-    "with torch.cuda.amp.autocast(enabled=train_config.use_amp):",
-    "    logits, loss, _ = model(x, y)",
-    "scaler.scale(loss).backward()",
-    "scaler.step(optimizer)",
-])
-
-
-# ──────────────── PAGE 5: TRAINING ────────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("5", "Training Pipeline")
-
-pdf.sub("5.1  Cosine Learning Rate Schedule with Warmup")
-pdf.body(
-    "The learning rate ramps linearly from 0 to 3e-4 over 200 warmup steps to prevent early "
-    "instability, then follows a cosine curve decaying to 3e-5 over 5,000 total iterations."
-)
-pdf.info_box([
-    "  warmup_iters   = 200   (linear ramp-up from 0)",
-    "  max_lr         = 3e-4",
-    "  min_lr         = 3e-5",
-    "  lr_decay_iters = 5,000  (cosine decay to min_lr)",
-])
-
-pdf.sub("5.2  Gradient Clipping (max_norm = 1.0)")
-pdf.body(
-    "Clipping prevents explosive gradients during training -- a common instability in deep "
-    "transformers, especially when learning rates are high or batch sizes are small."
-)
-
-pdf.sub("5.3  AdamW Optimiser with Weight Decay")
-pdf.body(
-    "AdamW (Adam + decoupled weight decay) with weight_decay=0.1 acts as L2 regularisation, "
-    "discouraging large weights and improving generalisation without hurting momentum estimates."
-)
-
-pdf.sub("5.4  Model Checkpointing")
-pdf.body(
-    "Validation loss is measured every 500 steps. When a new best is found, weights are saved "
-    "as model_best.pth. The final model is also always saved as model.pth after training ends."
-)
-
-pdf.sub("5.5  Current Training Configuration")
-pdf.table([
-    ("Setting", "Value"),
-    ("max_iters",      "5,000  iterations"),
-    ("batch_size",     "32  sequences per batch"),
-    ("learning_rate",  "3e-4 -> 3e-5  (cosine decay)"),
-    ("grad_clip",      "1.0"),
-    ("weight_decay",   "0.1"),
-    ("use_amp",        "True -- mixed precision (GPU)"),
-    ("device",         "cuda  (NVIDIA GPU)"),
-    ("eval_interval",  "every 500 iterations"),
-], c1=55)
-
-
-# ──────────────── PAGE 6: INFERENCE ───────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("6", "Inference & Text Generation")
-
-pdf.sub("6.1  KV Cache -- O(N) Generation")
-pdf.body(
-    "Without caching, generating each new token requires re-computing attention over all previous "
-    "tokens -- O(N^2) time. The KV Cache stores computed keys and values from past steps and "
-    "reuses them, so each new token costs only O(1). This dramatically speeds up generation."
-)
-pdf.code_box([
-    "# Only pass the newest token when cache is populated",
-    "if past_key_values is not None:",
-    "    idx_cond = idx[:, -1:]   # just the last token",
-    "else:",
-    "    idx_cond = idx[:, -block_size:]",
-])
-
-pdf.sub("6.2  Sampling Strategies")
-pdf.body(
-    "Four independent parameters control text quality and diversity. They can be combined freely:"
-)
-pdf.table([
-    ("Strategy", "Description"),
-    ("Temperature",        "Scales logits. < 1 = focused, > 1 = creative / random"),
-    ("Top-K",              "Keep only the K most probable tokens each step"),
-    ("Top-P (Nucleus)",    "Keep smallest set of tokens with cumulative prob >= P"),
-    ("Repetition Penalty", "Divide logit of already-seen tokens by penalty (> 1.0)"),
-], c1=55)
-
-pdf.sub("6.3  Interactive Web Demo (app.py)")
-pdf.body(
-    "A full Gradio 6.6.0 web interface was built and lets users experiment with all parameters:"
-)
-pdf.bullet([
-    "Launch: python app.py  ->  http://localhost:7860",
-    "Runs on CUDA GPU -- model loads at startup (6.03M params confirmed)",
-    "Sliders: Temperature, Top-K, Top-P, Repetition Penalty, Max Tokens",
-    "Loads model_best.pth if available, falls back to model.pth",
-])
-
-
-# ──────────────── PAGE 7: RECENT COMMITS ──────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("7", "GitHub Commit History (This Session)")
-pdf.body(
-    "Three features were implemented and pushed as separate, descriptive commits:"
-)
-pdf.ln(2)
-
-pdf.commit_badge("18b1687", "feat: Activate Grouped Query Attention (GQA) with n_kv_head=2")
-pdf.bullet([
-    "Set n_kv_head=2 as default in GPTConfig (was None / MHA)",
-    "4 query heads share 2 KV heads -> 50% KV parameter reduction",
-    "Added assertion: n_head must be divisible by n_kv_head",
-    "Added test_gqa.py -- 3 tests: KV param count, shapes, generation",
-    "All 3 tests PASSED [DONE]",
-], indent=6)
-pdf.ln(2)
-
-pdf.commit_badge("faeb03b", "feat: Scale model to 8L/256E/8H/4KV, block_size=128, max_iters=5000")
-pdf.bullet([
-    "n_layer 4->8,  n_embd 128->256,  n_head 4->8",
-    "n_kv_head 2->4  (GQA ratio maintained at 2:1)",
-    "block_size 64->128  (2x longer context window)",
-    "dropout 0.2->0.1, max_iters 2000->5000, warmup 100->200",
-    "Verified: 6.03M parameters on CUDA GPU [DONE]",
-], indent=6)
-pdf.ln(2)
-
-pdf.commit_badge("b35481a", "feat: Add interactive Gradio web demo (app.py)")
-pdf.bullet([
-    "app.py -- Gradio UI with prompt input and 5 sampling sliders",
-    "Loads model_best.pth or model.pth at startup",
-    "Runs on CUDA GPU (device=cuda confirmed on startup)",
-    "requirements.txt: torch, gradio>=4.0, sentencepiece, numpy",
-    "README.md updated with Quick Start, Web Demo section, test table",
-], indent=6)
-
-
-# ──────────────── PAGE 8: TESTING ─────────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("8", "Testing & Verification")
-pdf.table([
-    ("Test File", "What It Verifies"),
-    ("test_gqa.py",          "GQA KV param reduction (50%), forward shapes, generation"),
-    ("test_kv_cache.py",     "Cached output == uncached output; generation speedup"),
-    ("test_new_features.py", "Mixed precision, LR scheduler, all sampling modes"),
-    ("test_train.py",        "Training loop runs for a few steps without errors"),
-], c1=57)
-
-pdf.sub("8.1  GQA Test Output (Verified)")
-pdf.code_box([
-    "=== Grouped Query Attention (GQA) Tests ===",
-    "",
-    "[Test 1] KV Parameter Reduction:",
-    "  MHA KV params : 16,384",
-    "  GQA KV params :  8,192  (50.0% reduction)   PASSED",
-    "",
-    "[Test 2] Forward Pass Output Shape:",
-    "  Logits shape  : torch.Size([32, 256])",
-    "  KV cache K[0] : (2, 16, 2, 16)  n_kv_head=2  PASSED",
-    "",
-    "[Test 3] End-to-End Generation: 25 tokens      PASSED",
-    "",
-    "All GQA tests passed!",
-])
-
-
-# ──────────────── PAGE 9: HOW TO USE ──────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("9", "How to Use This Project")
-
-pdf.sub("Step 1 -- Install Dependencies")
-pdf.code_box(["pip install -r requirements.txt"])
-
-pdf.sub("Step 2 -- Prepare Training Data")
-pdf.body("Place any plain-text corpus as input.txt in the project root, then:")
-pdf.code_box([
-    "python train_tokenizer.py  # train BPE tokenizer -> bpe.model",
-    "python prepare_data.py     # tokenise -> train.bin + val.bin",
-])
-
-pdf.sub("Step 3 -- Train the Model")
-pdf.code_box([
-    "python train.py",
-    "# Trains 6.03M param model for 5000 iters on GPU",
-    "# Saves: model_best.pth (best val loss)  +  model.pth (final)",
-])
-
-pdf.sub("Step 4 -- Generate Text (Command Line)")
-pdf.code_box([
-    "python generate.py",
-    "# Prompts for input and generates continuation",
-])
-
-pdf.sub("Step 5 -- Launch Web Demo")
-pdf.code_box([
-    "python app.py",
-    "# Starts Gradio at http://localhost:7860",
-    "# Full sliders: Temperature, Top-K, Top-P, Repetition Penalty",
-])
-
-pdf.sub("Step 6 -- Run Tests")
-pdf.code_box([
-    "python test_gqa.py",
-    "python test_kv_cache.py",
-    "python test_new_features.py",
-])
-
-
-# ──────────────── PAGE 10: ROADMAP ────────────────────────────────────────────
-pdf.add_page()
-
-pdf.sec("10", "Completed Roadmap & Future Work")
-pdf.table([
-    ("Feature", "Status"),
-    ("RMSNorm",                           "DONE  (Phase 1)"),
-    ("Rotary Positional Embeddings (RoPE)", "DONE  (Phase 1)"),
-    ("SwiGLU Activation",                  "DONE  (Phase 1)"),
-    ("Grouped Query Attention (GQA)",       "DONE  (Phase 1 -- activated this session)"),
-    ("Modular Codebase",                   "DONE  (Phase 2)"),
-    ("BPE Tokenizer",                      "DONE  (Phase 2)"),
-    ("numpy.memmap Data Loading",          "DONE  (Phase 2)"),
-    ("Mixed Precision Training (AMP)",     "DONE  (Phase 2)"),
-    ("KV Cache",                           "DONE  (Phase 3)"),
-    ("Temperature / Top-K / Top-P / RepPen","DONE  (Phase 3)"),
-    ("Cosine LR Schedule + Warmup",        "DONE  (Phase 4)"),
-    ("Gradient Clipping",                  "DONE  (Phase 4)"),
-    ("AdamW + Weight Decay",               "DONE  (Phase 4)"),
-    ("Model Checkpointing",                "DONE  (Phase 4)"),
-    ("Scale-up to 6M params",              "DONE  (this session)"),
-    ("Gradio Web Demo",                    "DONE  (this session)"),
-    ("Flash Attention",                    "Planned -- Phase 5"),
-    ("Model Quantisation (INT8/INT4)",     "Planned -- Phase 5"),
-    ("HuggingFace Spaces Deployment",     "Planned -- Phase 5"),
-], c1=90)
-
-pdf.sub("Possible Next Steps")
-pdf.bullet([
-    "Full training run on the 6M-param model (python train.py)",
-    "Deploy Gradio demo to HuggingFace Spaces for public access",
-    "Implement Flash Attention for 2-4x faster training",
-    "Quantise to INT8/INT4 for fast low-memory CPU inference",
-    "Fine-tune on a larger corpus (TinyStories, OpenWebText)",
-])
-
-# ── save ──────────────────────────────────────────────────────────────────────
-out = "project_report.pdf"
-pdf.output(out)
-print(f"Report saved: {os.path.abspath(out)}")
-print(f"Pages: {pdf.page}")
+import numpy as np
+import torch
+
+from config import GPTConfig, TrainConfig
+from lora import inject_lora
+from model import GPTLanguageModel
+from tokenizer import BPETokenizer
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+
+
+DEFAULT_PROMPTS = [
+    "To be, or not to be",
+    "The king said",
+    "In fair Verona",
+]
+
+
+@dataclass
+class EvalResult:
+    name: str
+    perplexity: float
+    latency_ms_per_token: float
+    repetition_rate: float
+    distinct_1: float
+    distinct_2: float
+
+
+def set_seed(seed: int) -> None:
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+
+def infer_config_from_checkpoint(checkpoint: Dict[str, torch.Tensor]) -> GPTConfig:
+    config = GPTConfig()
+
+    if "token_embedding_table.weight" in checkpoint:
+        vocab_size, n_embd = checkpoint["token_embedding_table.weight"].shape
+        config.vocab_size = vocab_size
+        config.n_embd = n_embd
+
+    n_layer = sum(1 for k in checkpoint if k.endswith(".sa.c_proj.weight"))
+    if n_layer > 0:
+        config.n_layer = n_layer
+
+    # Preserve existing project assumptions for known model sizes.
+    if config.n_embd == 128:
+        config.n_head = 4
+        config.n_kv_head = 2
+        config.block_size = 64
+    elif config.n_embd == 256:
+        config.n_head = 8
+        config.n_kv_head = 4
+        config.block_size = 128
+
+    return config
+
+
+def load_tokenizer(prefix: str) -> BPETokenizer:
+    tokenizer = BPETokenizer()
+    tokenizer.load(prefix)
+    return tokenizer
+
+
+def load_base_model(model_path: str, device: str, vocab_size: int) -> Tuple[GPTLanguageModel, GPTConfig]:
+    checkpoint = torch.load(model_path, map_location="cpu")
+    config = infer_config_from_checkpoint(checkpoint)
+    config.vocab_size = vocab_size
+
+    model = GPTLanguageModel(config)
+    model.load_state_dict(checkpoint, strict=False)
+    model.to(device)
+    model.eval()
+    return model, config
+
+
+def infer_lora_rank(lora_state: Dict[str, torch.Tensor]) -> int:
+    for key, value in lora_state.items():
+        if key.endswith("lora_A"):
+            return int(value.shape[0])
+    return 8
+
+
+def load_lora_model(base_model_path: str, lora_path: str, device: str, vocab_size: int) -> Tuple[GPTLanguageModel, GPTConfig]:
+    checkpoint = torch.load(base_model_path, map_location="cpu")
+    lora_state = torch.load(lora_path, map_location="cpu")
+
+    config = infer_config_from_checkpoint(checkpoint)
+    config.vocab_size = vocab_size
+    config.lora_rank = infer_lora_rank(lora_state)
+    config.lora_alpha = 32
+    config.lora_dropout = 0.0
+
+    model = GPTLanguageModel(config)
+    model.load_state_dict(checkpoint, strict=False)
+    model = inject_lora(model, config)
+    model.load_state_dict(lora_state, strict=False)
+    model.to(device)
+    model.eval()
+    return model, config
+
+
+def softmax_np(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    x = x - np.max(x, axis=axis, keepdims=True)
+    e = np.exp(x)
+    return e / np.sum(e, axis=axis, keepdims=True)
+
+
+def sample_next_token_numpy(
+    logits: np.ndarray,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    repetition_penalty: float,
+    generated: List[int],
+) -> int:
+    logits = logits.astype(np.float64)
+
+    if repetition_penalty != 1.0 and generated:
+        for token_id in set(generated):
+            logits[token_id] /= repetition_penalty
+
+    logits = logits / max(temperature, 1e-6)
+
+    if top_k > 0:
+        kth = np.partition(logits, -top_k)[-top_k]
+        logits[logits < kth] = -np.inf
+
+    if top_p < 1.0:
+        sorted_indices = np.argsort(logits)[::-1]
+        sorted_logits = logits[sorted_indices]
+        sorted_probs = softmax_np(sorted_logits)
+        cumulative = np.cumsum(sorted_probs)
+        remove = cumulative > top_p
+        remove[1:] = remove[:-1]
+        remove[0] = False
+        logits[sorted_indices[remove]] = -np.inf
+
+    probs = softmax_np(logits)
+    next_token = int(np.random.choice(len(probs), p=probs))
+    return next_token
+
+
+@torch.no_grad()
+def sample_next_token_torch(
+    logits: torch.Tensor,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    repetition_penalty: float,
+    generated: List[int],
+) -> int:
+    logits = logits.clone()
+
+    if repetition_penalty != 1.0 and generated:
+        for token_id in set(generated):
+            logits[token_id] /= repetition_penalty
+
+    logits = logits / max(temperature, 1e-6)
+
+    if top_k > 0:
+        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+        logits[logits < v[-1]] = -float("inf")
+
+    if top_p < 1.0:
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        probs = torch.softmax(sorted_logits, dim=-1)
+        cumulative_probs = torch.cumsum(probs, dim=-1)
+
+        sorted_indices_to_remove = cumulative_probs > top_p
+        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[..., 0] = False
+
+        indices_to_remove = torch.zeros_like(logits, dtype=torch.bool)
+        indices_to_remove.scatter_(0, sorted_indices, sorted_indices_to_remove)
+        logits[indices_to_remove] = -float("inf")
+
+    probs = torch.softmax(logits, dim=-1)
+    return int(torch.multinomial(probs, num_samples=1).item())
+
+
+@torch.no_grad()
+def generate_with_torch(
+    model: GPTLanguageModel,
+    prompt_ids: List[int],
+    max_new_tokens: int,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    repetition_penalty: float,
+    device: str,
+) -> List[int]:
+    if prompt_ids:
+        idx = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+    else:
+        idx = torch.zeros((1, 1), dtype=torch.long, device=device)
+
+    generated = idx[0].tolist()
+    past_key_values = None
+
+    for _ in range(max_new_tokens):
+        if past_key_values is not None:
+            idx_cond = idx[:, -1:]
+        else:
+            idx_cond = idx[:, -model.config.block_size :]
+
+        logits, _, past_key_values = model(idx_cond, past_key_values=past_key_values)
+        next_token = sample_next_token_torch(
+            logits[0, -1, :],
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            generated=generated,
+        )
+
+        next_token_t = torch.tensor([[next_token]], dtype=torch.long, device=device)
+        idx = torch.cat((idx, next_token_t), dim=1)
+        generated.append(next_token)
+
+    return generated
+
+
+def generate_with_onnx(
+    session: "ort.InferenceSession",
+    prompt_ids: List[int],
+    max_new_tokens: int,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    repetition_penalty: float,
+    context_len: int,
+) -> List[int]:
+    generated = list(prompt_ids) if prompt_ids else [0]
+
+    for _ in range(max_new_tokens):
+        # Keep a fixed ONNX context length to match export-time assumptions.
+        window = generated[-context_len:]
+        if len(window) < context_len:
+            window = ([0] * (context_len - len(window))) + window
+
+        input_ids = np.array([window], dtype=np.int64)
+        logits = session.run(None, {"input_ids": input_ids})[0]
+        next_token = sample_next_token_numpy(
+            logits=logits[0, -1, :],
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            generated=generated,
+        )
+        generated.append(next_token)
+
+    return generated
+
+
+def distinct_n(tokens: List[int], n: int) -> float:
+    if len(tokens) < n:
+        return 0.0
+    ngrams = [tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)]
+    return len(set(ngrams)) / max(len(ngrams), 1)
+
+
+def repetition_rate(tokens: List[int]) -> float:
+    if not tokens:
+        return 0.0
+    repeats = len(tokens) - len(set(tokens))
+    return repeats / len(tokens)
+
+
+@torch.no_grad()
+def perplexity_torch(
+    model: GPTLanguageModel,
+    val_data: np.memmap,
+    block_size: int,
+    batch_size: int,
+    steps: int,
+    device: str,
+) -> float:
+    losses = []
+
+    for _ in range(steps):
+        ix = np.random.randint(0, len(val_data) - block_size - 1, size=(batch_size,))
+        x = np.stack([val_data[i : i + block_size].astype(np.int64) for i in ix])
+        y = np.stack([val_data[i + 1 : i + 1 + block_size].astype(np.int64) for i in ix])
+
+        x_t = torch.from_numpy(x).to(device)
+        y_t = torch.from_numpy(y).to(device)
+
+        _, loss, _ = model(x_t, y_t)
+        losses.append(float(loss.item()))
+
+    return float(math.exp(np.mean(losses)))
+
+
+def logsumexp_np(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    m = np.max(x, axis=axis, keepdims=True)
+    return np.log(np.sum(np.exp(x - m), axis=axis, keepdims=True)) + m
+
+
+def perplexity_onnx(
+    session: "ort.InferenceSession",
+    val_data: np.memmap,
+    block_size: int,
+    batch_size: int,
+    steps: int,
+) -> float:
+    if len(val_data) <= block_size + 1:
+        raise ValueError(
+            f"val.bin is too small for ONNX context length {block_size}. "
+            f"Need at least {block_size + 2} tokens, found {len(val_data)}."
+        )
+
+    losses = []
+
+    for _ in range(steps):
+        ix = np.random.randint(0, len(val_data) - block_size - 1, size=(batch_size,))
+        x = np.stack([val_data[i : i + block_size].astype(np.int64) for i in ix])
+        y = np.stack([val_data[i + 1 : i + 1 + block_size].astype(np.int64) for i in ix])
+
+        logits = session.run(None, {"input_ids": x})[0]
+        lse = logsumexp_np(logits, axis=-1)
+
+        b_idx = np.arange(batch_size)[:, None]
+        t_idx = np.arange(block_size)[None, :]
+        target_logits = logits[b_idx, t_idx, y]
+
+        nll = -(target_logits - lse.squeeze(-1))
+        losses.append(float(np.mean(nll)))
+
+    return float(math.exp(np.mean(losses)))
+
+
+def resolve_onnx_context_len(session: "ort.InferenceSession", requested: int) -> int:
+    candidates = [requested, 128, 64, 32]
+    tried = []
+
+    for context_len in dict.fromkeys(candidates):
+        if context_len <= 0:
+            continue
+        try:
+            probe = np.zeros((1, context_len), dtype=np.int64)
+            session.run(None, {"input_ids": probe})
+            return context_len
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            tried.append(f"{context_len}: {exc}")
+
+    details = " | ".join(tried)
+    raise RuntimeError(f"Could not resolve ONNX context length. Attempts: {details}")
+
+
+def evaluate_model(
+    name: str,
+    generate_fn: Callable[[List[int]], List[int]],
+    perplexity_fn: Callable[[], float],
+    tokenizer: BPETokenizer,
+    max_new_tokens: int,
+) -> EvalResult:
+    ppl = perplexity_fn()
+
+    latencies = []
+    rep_rates = []
+    d1s = []
+    d2s = []
+
+    for prompt in DEFAULT_PROMPTS:
+        prompt_ids = tokenizer.encode(prompt)
+
+        start = time.perf_counter()
+        out_ids = generate_fn(prompt_ids)
+        duration = time.perf_counter() - start
+
+        new_tokens = out_ids[len(prompt_ids) :]
+        if not new_tokens:
+            new_tokens = out_ids[-max_new_tokens:]
+
+        latencies.append((duration * 1000.0) / max(len(new_tokens), 1))
+        rep_rates.append(repetition_rate(new_tokens))
+        d1s.append(distinct_n(new_tokens, 1))
+        d2s.append(distinct_n(new_tokens, 2))
+
+    return EvalResult(
+        name=name,
+        perplexity=float(np.mean([ppl])),
+        latency_ms_per_token=float(np.mean(latencies)),
+        repetition_rate=float(np.mean(rep_rates)),
+        distinct_1=float(np.mean(d1s)),
+        distinct_2=float(np.mean(d2s)),
+    )
+
+
+def render_markdown(results: List[EvalResult], output_path: str) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    lines = [
+        "# Evaluation Scorecard",
+        "",
+        f"Generated: {now}",
+        "",
+        "| Model | Perplexity (lower better) | Latency ms/token (lower better) | Repetition Rate (lower better) | Distinct-1 (higher better) | Distinct-2 (higher better) |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+
+    for r in results:
+        lines.append(
+            f"| {r.name} | {r.perplexity:.4f} | {r.latency_ms_per_token:.3f} | {r.repetition_rate:.4f} | {r.distinct_1:.4f} | {r.distinct_2:.4f} |"
+        )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def print_summary(results: List[EvalResult], output_path: str) -> None:
+    print("\n" + "=" * 98)
+    print("EVALUATION SCORECARD")
+    print("=" * 98)
+    print(
+        f"{'Model':<10} {'Perplexity':>12} {'ms/token':>12} {'Repetition':>12} {'Distinct-1':>12} {'Distinct-2':>12}"
+    )
+    print("-" * 98)
+
+    for r in results:
+        print(
+            f"{r.name:<10} {r.perplexity:>12.4f} {r.latency_ms_per_token:>12.3f} {r.repetition_rate:>12.4f} {r.distinct_1:>12.4f} {r.distinct_2:>12.4f}"
+        )
+
+    print("=" * 98)
+    print(f"Saved markdown report to: {output_path}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate base/LoRA/ONNX model variants.")
+    parser.add_argument("--compare", nargs="+", default=["base", "lora", "onnx"], choices=["base", "lora", "onnx"]) 
+    parser.add_argument("--model-path", type=str, default="model.pth")
+    parser.add_argument("--lora-path", type=str, default="lora_weights.pth")
+    parser.add_argument("--onnx-path", type=str, default="model.onnx")
+    parser.add_argument("--tokenizer-prefix", type=str, default="bpe")
+    parser.add_argument("--val-bin", type=str, default="val.bin")
+    parser.add_argument("--output", type=str, default="evaluation_report.md")
+
+    parser.add_argument("--max-new-tokens", type=int, default=100)
+    parser.add_argument("--ppl-steps", type=int, default=30)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--onnx-context-len", type=int, default=64)
+
+    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--top-k", type=int, default=50)
+    parser.add_argument("--top-p", type=float, default=0.9)
+    parser.add_argument("--repetition-penalty", type=float, default=1.1)
+
+    parser.add_argument("--seed", type=int, default=42)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    set_seed(args.seed)
+
+    if not os.path.exists(args.val_bin):
+        raise FileNotFoundError(f"Validation binary not found: {args.val_bin}")
+
+    tokenizer = load_tokenizer(args.tokenizer_prefix)
+    val_data = np.memmap(args.val_bin, dtype=np.uint16, mode="r")
+
+    train_config = TrainConfig()
+    device = train_config.device
+
+    results: List[EvalResult] = []
+
+    if "base" in args.compare:
+        if not os.path.exists(args.model_path):
+            print(f"[WARN] Skipping base: missing {args.model_path}")
+        else:
+            base_model, base_config = load_base_model(args.model_path, device, len(tokenizer.vocab))
+
+            base_result = evaluate_model(
+                name="base",
+                generate_fn=lambda prompt_ids: generate_with_torch(
+                    model=base_model,
+                    prompt_ids=prompt_ids,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    top_p=args.top_p,
+                    repetition_penalty=args.repetition_penalty,
+                    device=device,
+                ),
+                perplexity_fn=lambda: perplexity_torch(
+                    model=base_model,
+                    val_data=val_data,
+                    block_size=base_config.block_size,
+                    batch_size=args.batch_size,
+                    steps=args.ppl_steps,
+                    device=device,
+                ),
+                tokenizer=tokenizer,
+                max_new_tokens=args.max_new_tokens,
+            )
+            results.append(base_result)
+
+    if "lora" in args.compare:
+        if not os.path.exists(args.model_path) or not os.path.exists(args.lora_path):
+            print(f"[WARN] Skipping lora: missing {args.model_path} or {args.lora_path}")
+        else:
+            lora_model, lora_config = load_lora_model(args.model_path, args.lora_path, device, len(tokenizer.vocab))
+
+            lora_result = evaluate_model(
+                name="lora",
+                generate_fn=lambda prompt_ids: generate_with_torch(
+                    model=lora_model,
+                    prompt_ids=prompt_ids,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    top_p=args.top_p,
+                    repetition_penalty=args.repetition_penalty,
+                    device=device,
+                ),
+                perplexity_fn=lambda: perplexity_torch(
+                    model=lora_model,
+                    val_data=val_data,
+                    block_size=lora_config.block_size,
+                    batch_size=args.batch_size,
+                    steps=args.ppl_steps,
+                    device=device,
+                ),
+                tokenizer=tokenizer,
+                max_new_tokens=args.max_new_tokens,
+            )
+            results.append(lora_result)
+
+    if "onnx" in args.compare:
+        if ort is None:
+            print("[WARN] Skipping onnx: onnxruntime is not installed")
+        elif not os.path.exists(args.onnx_path):
+            print(f"[WARN] Skipping onnx: missing {args.onnx_path}")
+        else:
+            onnx_session = ort.InferenceSession(args.onnx_path)
+            onnx_context_len = resolve_onnx_context_len(onnx_session, args.onnx_context_len)
+            if onnx_context_len != args.onnx_context_len:
+                print(
+                    f"[WARN] Requested ONNX context {args.onnx_context_len} is incompatible; "
+                    f"using {onnx_context_len}"
+                )
+            print(f"[INFO] ONNX context length: {onnx_context_len}")
+
+            onnx_result = evaluate_model(
+                name="onnx",
+                generate_fn=lambda prompt_ids: generate_with_onnx(
+                    session=onnx_session,
+                    prompt_ids=prompt_ids,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    top_p=args.top_p,
+                    repetition_penalty=args.repetition_penalty,
+                    context_len=onnx_context_len,
+                ),
+                perplexity_fn=lambda: perplexity_onnx(
+                    session=onnx_session,
+                    val_data=val_data,
+                    block_size=onnx_context_len,
+                    batch_size=args.batch_size,
+                    steps=args.ppl_steps,
+                ),
+                tokenizer=tokenizer,
+                max_new_tokens=args.max_new_tokens,
+            )
+            results.append(onnx_result)
+
+    if not results:
+        raise RuntimeError("No model variants were evaluated. Check file paths and dependencies.")
+
+    render_markdown(results, args.output)
+    print_summary(results, args.output)
+
+
+if __name__ == "__main__":
+    main()
