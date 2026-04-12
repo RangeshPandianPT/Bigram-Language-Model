@@ -1,8 +1,8 @@
 import torch
 import time
 import os
-from config import GPTConfig
-from model import GPTLanguageModel
+from llm.config import GPTConfig
+from llm.model import GPTLanguageModel
 
 def measure_size_and_time(model, context, n_tokens=50):
     # Measure size using state_dict

@@ -1,14 +1,18 @@
 import torch
 import os
-from config import GPTConfig
-from model import GPTLanguageModel
-from tokenizer import BPETokenizer
+from scripts._bootstrap import ROOT_DIR
+from llm.config import GPTConfig
+from llm.model import GPTLanguageModel
+from llm.tokenizer import BPETokenizer
+from llm.paths import MODEL_PATH, ONNX_MODEL_PATH, TOKENIZER_PREFIX, ensure_project_dirs
 
-def export_to_onnx(model_path="model.pth", output_path="model.onnx"):
+def export_to_onnx(model_path=str(MODEL_PATH), output_path=str(ONNX_MODEL_PATH)):
+    ensure_project_dirs()
+
     print("Loading config and tokenizer...")
     print("Loading tokenizer...")
     tokenizer = BPETokenizer()
-    tokenizer.load("bpe")
+    tokenizer.load(str(TOKENIZER_PREFIX))
     
     if not os.path.exists(model_path):
         print(f"Error: Could not find '{model_path}'. Please ensure the model is trained.")

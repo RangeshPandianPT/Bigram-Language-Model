@@ -1,7 +1,10 @@
 import torch
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
+
+from scripts._bootstrap import ROOT_DIR
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
+from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 
 def compare_sampling_strategies():
     """Compare different sampling strategies side-by-side"""
@@ -12,12 +15,12 @@ def compare_sampling_strategies():
     
     # Load tokenizer
     tokenizer = BPETokenizer()
-    tokenizer.load("bpe")
+    tokenizer.load(str(TOKENIZER_PREFIX))
     gpt_config.vocab_size = len(tokenizer.vocab)
     
     # Initialize model
     model = GPTLanguageModel(gpt_config)
-    model.load_state_dict(torch.load('model.pth', map_location=train_config.device))
+    model.load_state_dict(torch.load(str(MODEL_PATH), map_location=train_config.device))
     model.to(train_config.device)
     model.eval()
     

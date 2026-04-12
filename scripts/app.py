@@ -4,10 +4,13 @@ Run: python app.py
 """
 import torch
 import gradio as gr
-from config import GPTConfig, SamplingConfig
-from model import GPTLanguageModel
-from tokenizer import BPETokenizer
 import os
+
+from scripts._bootstrap import ROOT_DIR
+from llm.config import GPTConfig, SamplingConfig
+from llm.model import GPTLanguageModel
+from llm.tokenizer import BPETokenizer
+from llm.paths import MODEL_BEST_PATH, MODEL_PATH, TOKENIZER_PREFIX
 
 # ─────────────────────────────────────────────
 # Load model and tokenizer on startup
@@ -15,7 +18,7 @@ import os
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 tokenizer = BPETokenizer()
-tokenizer.load("bpe")
+tokenizer.load(str(TOKENIZER_PREFIX))
 
 config = GPTConfig()
 config.vocab_size = len(tokenizer.vocab)
@@ -23,7 +26,7 @@ config.vocab_size = len(tokenizer.vocab)
 model = GPTLanguageModel(config).to(DEVICE)
 
 # Try best checkpoint first, fall back to model.pth
-CKPT = "model_best.pth" if os.path.exists("model_best.pth") else "model.pth"
+CKPT = str(MODEL_BEST_PATH) if os.path.exists(str(MODEL_BEST_PATH)) else str(MODEL_PATH)
 if os.path.exists(CKPT):
     state = torch.load(CKPT, map_location=DEVICE)
     model.load_state_dict(state)

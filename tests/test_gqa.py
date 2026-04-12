@@ -7,8 +7,8 @@ Tests:
   3. Generation: model.generate() runs without errors with GQA active
 """
 import torch
-from config import GPTConfig
-from model import GPTLanguageModel
+from llm.config import GPTConfig
+from llm.model import GPTLanguageModel
 
 DEVICE = "cpu"
 

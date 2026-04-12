@@ -1,6 +1,6 @@
 import torch
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
 
 def test_training_loop():
     # Setup minimal config for testing
@@ -9,6 +9,7 @@ def test_training_loop():
         block_size=8,
         n_layer=2,
         n_head=2,
+        n_kv_head=2,
         n_embd=32
     )
     
@@ -47,7 +48,7 @@ def test_training_loop():
             losses = torch.zeros(train_config.eval_iters)
             for k in range(train_config.eval_iters):
                 X, Y = get_batch(split)
-                logits, loss = model(X, Y)
+                logits, loss, _ = model(X, Y)
                 losses[k] = loss.item()
             out[split] = losses.mean()
         model.train()
@@ -63,7 +64,7 @@ def test_training_loop():
             print(f"step {iter}: train loss {losses['train']:.4f}")
 
         xb, yb = get_batch('train')
-        logits, loss = model(xb, yb)
+        logits, loss, _ = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()

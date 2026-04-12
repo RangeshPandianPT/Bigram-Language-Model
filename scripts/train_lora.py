@@ -1,13 +1,21 @@
 import torch
-import torch.nn as nn
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
-from lora import inject_lora
 import numpy as np
 import os
-import math
-from train import get_lr
+
+from scripts._bootstrap import ROOT_DIR
+from scripts.train import get_lr
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
+from llm.lora import inject_lora
+from llm.paths import (
+    LORA_WEIGHTS_PATH,
+    MODEL_PATH,
+    TOKENIZER_PREFIX,
+    TRAIN_BIN_PATH,
+    VAL_BIN_PATH,
+    ensure_project_dirs,
+)
 
 @torch.no_grad()
 def estimate_loss(model, train_data, val_data, train_config, block_size):
@@ -30,6 +38,8 @@ def estimate_loss(model, train_data, val_data, train_config, block_size):
     return out
 
 def train_lora():
+    ensure_project_dirs()
+
     train_config = TrainConfig()
     
     # We will run a quick training loop for demonstration
@@ -39,9 +49,9 @@ def train_lora():
     
     print("Loading config and tokenizer...")
     tokenizer = BPETokenizer()
-    tokenizer.load("bpe")
+    tokenizer.load(str(TOKENIZER_PREFIX))
     
-    model_path = 'model.pth'
+    model_path = MODEL_PATH
     if not os.path.exists(model_path):
         print(f"Error: Could not find '{model_path}' to fine-tune.")
         return
@@ -82,8 +92,8 @@ def train_lora():
     model.to(train_config.device)
     
     # Load data
-    train_data = np.memmap('train.bin', dtype=np.uint16, mode='r')
-    val_data = np.memmap('val.bin', dtype=np.uint16, mode='r')
+    train_data = np.memmap(TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
+    val_data = np.memmap(VAL_BIN_PATH, dtype=np.uint16, mode='r')
     
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()), 
@@ -108,7 +118,7 @@ def train_lora():
                 best_val_loss = losses['val']
                 # Save only LoRA parameters
                 lora_state_dict = {n: p for n, p in model.state_dict().items() if 'lora_' in n}
-                torch.save(lora_state_dict, 'lora_weights.pth')
+                torch.save(lora_state_dict, LORA_WEIGHTS_PATH)
                 
         ix = torch.randint(len(train_data) - config.block_size, (train_config.batch_size,))
         x = torch.stack([torch.from_numpy((train_data[i:i+config.block_size]).astype(np.int64)) for i in ix])

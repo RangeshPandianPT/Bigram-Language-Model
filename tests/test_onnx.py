@@ -2,8 +2,8 @@ import onnxruntime as ort
 import numpy as np
 import torch
 import os
-from config import GPTConfig
-from model import GPTLanguageModel
+from llm.config import GPTConfig
+from llm.model import GPTLanguageModel
 
 def verify_onnx():
     print("Loading PyTorch model...")
