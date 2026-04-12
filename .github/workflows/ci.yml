@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
+        run: |
+          pytest -q tests/test_gqa.py tests/test_kv_cache.py tests/test_train.py
+
+      - name: API smoke test
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python -m uvicorn scripts.api:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          API_PID=$!
+          trap 'kill ${API_PID}' EXIT
+
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:8000/health > health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [ ! -f health.json ]; then
+            echo "API did not become healthy in time"
+            cat api.log
+            exit 1
+          fi
+
+          python - <<'PY'
+import json
+with open('health.json', 'r', encoding='utf-8') as f:
+    payload = json.load(f)
+
+assert payload.get('status') == 'ok', payload
+print('Health payload:', payload)
+PY

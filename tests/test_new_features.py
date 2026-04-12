@@ -3,9 +3,9 @@ Quick test to verify new training features work correctly
 """
 import torch
 import numpy as np
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
 import math
 
 # Override config for quick test
@@ -52,7 +52,7 @@ print("=" * 80)
 
 # Test learning rate schedule
 print("\nTesting LR Schedule:")
-from train import get_lr
+from scripts.train import get_lr
 for it in [0, 50, 100, 500, 1000, 2000, 2500]:
     lr = get_lr(it, train_config)
     print(f"  Iter {it:4d}: LR = {lr:.6f}")

@@ -1,8 +1,8 @@
 import torch
 import time
 import torch.nn.functional as F
-from config import GPTConfig
-from model import GPTLanguageModel
+from llm.config import GPTConfig
+from llm.model import GPTLanguageModel
 
 def test_kv_cache():
     # Use CPU for deterministic testing or CUDA if available
