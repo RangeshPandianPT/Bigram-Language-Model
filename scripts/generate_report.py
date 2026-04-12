@@ -20,10 +20,11 @@ from typing import Callable, Dict, List, Tuple
 import numpy as np
 import torch
 
-from config import GPTConfig, TrainConfig
-from lora import inject_lora
-from model import GPTLanguageModel
-from tokenizer import BPETokenizer
+from scripts._bootstrap import ROOT_DIR
+from llm.config import GPTConfig, TrainConfig
+from llm.lora import inject_lora
+from llm.model import GPTLanguageModel
+from llm.tokenizer import BPETokenizer
 
 try:
     import onnxruntime as ort

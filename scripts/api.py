@@ -4,9 +4,11 @@ import torch
 import uvicorn
 from contextlib import asynccontextmanager
 
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
+from scripts._bootstrap import ROOT_DIR
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
+from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 
 # Global variables to hold our model and tokenizer
 model = None
@@ -24,13 +26,13 @@ async def lifespan(app: FastAPI):
         device = train_config.device
 
         tokenizer = BPETokenizer()
-        tokenizer.load("bpe")
+        tokenizer.load(str(TOKENIZER_PREFIX))
         gpt_config.vocab_size = len(tokenizer.vocab)
 
         model = GPTLanguageModel(gpt_config)
         
         # Load the trained weights
-        model_path = 'model.pth'
+        model_path = str(MODEL_PATH)
         model.load_state_dict(torch.load(model_path, map_location=device))
         model.to(device)
         model.eval()
@@ -60,6 +62,16 @@ class GenerateResponse(BaseModel):
 @app.get("/")
 def read_root():
     return {"status": "online", "message": "Bigram LLM API is running. Send POST requests to /generate."}
+
+
+@app.get("/health")
+def read_health():
+    return {
+        "status": "ok",
+        "model_loaded": model is not None,
+        "tokenizer_loaded": tokenizer is not None,
+        "device": str(device) if device is not None else None,
+    }
 
 @app.post("/generate", response_model=GenerateResponse)
 def generate_text(request: GenerateRequest):

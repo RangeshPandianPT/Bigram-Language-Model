@@ -1,8 +1,11 @@
 import torch
 import argparse
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig, SamplingConfig
-from model import GPTLanguageModel
+
+from scripts._bootstrap import ROOT_DIR
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
+from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 
 def generate(args):
     # Load config
@@ -11,14 +14,14 @@ def generate(args):
     
     # Load tokenizer
     tokenizer = BPETokenizer()
-    tokenizer.load("bpe")
+    tokenizer.load(str(TOKENIZER_PREFIX))
     gpt_config.vocab_size = len(tokenizer.vocab)
     
     # Initialize model
     model = GPTLanguageModel(gpt_config)
     
     # Load model weights
-    model_path = args.model_path if args.model_path else 'model.pth'
+    model_path = args.model_path if args.model_path else str(MODEL_PATH)
     model.load_state_dict(torch.load(model_path, map_location=train_config.device))
     model.to(train_config.device)
     model.eval()
@@ -60,7 +63,7 @@ def generate(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate text from trained model')
-    parser.add_argument('--model_path', type=str, default='model.pth', help='Path to model checkpoint')
+    parser.add_argument('--model_path', type=str, default=str(MODEL_PATH), help='Path to model checkpoint')
     parser.add_argument('--prompt', type=str, default='', help='Prompt text to start generation')
     parser.add_argument('--max_tokens', type=int, default=500, help='Maximum tokens to generate')
     parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature (higher = more random)')
