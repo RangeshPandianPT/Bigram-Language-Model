@@ -1,9 +1,20 @@
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
-from tokenizer import BPETokenizer
-from config import GPTConfig, TrainConfig
-from model import GPTLanguageModel
+import numpy as np
+import math
+
+from scripts._bootstrap import ROOT_DIR
+from llm.tokenizer import BPETokenizer
+from llm.config import GPTConfig, TrainConfig
+from llm.model import GPTLanguageModel
+from llm.paths import (
+    MODEL_BEST_PATH,
+    MODEL_PATH,
+    TOKENIZER_PREFIX,
+    TRAIN_BIN_PATH,
+    VAL_BIN_PATH,
+    ensure_project_dirs,
+)
 
 # Configuration
 train_config = TrainConfig()
@@ -13,12 +24,8 @@ torch.manual_seed(1337)
 
 # Load tokenizer
 tokenizer = BPETokenizer()
-tokenizer.load("bpe")
+tokenizer.load(str(TOKENIZER_PREFIX))
 gpt_config.vocab_size = len(tokenizer.vocab)
-
-import numpy as np
-import os
-import math
 
 def get_lr(it, config):
     """Learning rate schedule with warmup and cosine decay"""
@@ -57,18 +64,20 @@ def estimate_loss(model, train_data, val_data, config):
     return out
 
 def train():
+    ensure_project_dirs()
+
     # Load config
     train_config = TrainConfig()
     gpt_config = GPTConfig()
     
     # Load tokenizer
     tokenizer = BPETokenizer()
-    tokenizer.load("bpe")
+    tokenizer.load(str(TOKENIZER_PREFIX))
     gpt_config.vocab_size = len(tokenizer.vocab)
     
     # Load data
-    train_data = np.memmap('train.bin', dtype=np.uint16, mode='r')
-    val_data = np.memmap('val.bin', dtype=np.uint16, mode='r')
+    train_data = np.memmap(TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
+    val_data = np.memmap(VAL_BIN_PATH, dtype=np.uint16, mode='r')
     
     # Initialize model
     model = GPTLanguageModel(gpt_config)
@@ -111,7 +120,7 @@ def train():
             if losses['val'] < best_val_loss:
                 best_val_loss = losses['val']
                 model_to_save = model.module if hasattr(model, 'module') else model
-                torch.save(model_to_save.state_dict(), 'model_best.pth')
+                torch.save(model_to_save.state_dict(), MODEL_BEST_PATH)
                 print(f"Saved best model with val loss {best_val_loss:.4f}")
         
         # Sample a batch of data
@@ -139,7 +148,7 @@ def train():
     
     # Save final model
     model_to_save = model.module if hasattr(model, 'module') else model
-    torch.save(model_to_save.state_dict(), 'model.pth')
+    torch.save(model_to_save.state_dict(), MODEL_PATH)
     print("Training complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
 
