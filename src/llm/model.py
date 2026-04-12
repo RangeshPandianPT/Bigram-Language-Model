@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import math
-from config import GPTConfig
+from .config import GPTConfig
 
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
