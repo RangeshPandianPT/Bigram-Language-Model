@@ -159,13 +159,81 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.dropout(self.w3(F.silu(self.w1(x)) * self.w2(x)))
 
+class MoEBlock(nn.Module):
+    """ Mixture of Experts (MoE) block replacing FeedForward """
+    def __init__(self, config: GPTConfig):
+        super().__init__()
+        self.n_experts = config.n_experts
+        self.num_experts_per_tok = config.num_experts_per_tok
+        
+        # Gate network to compute routing probabilities
+        self.gate = nn.Linear(config.n_embd, self.n_experts, bias=False)
+        
+        # Expert networks
+        self.experts = nn.ModuleList([FeedForward(config) for _ in range(self.n_experts)])
+        
+    def forward(self, x):
+        # x shape: (B, T, C)
+        orig_shape = x.shape
+        x_flat = x.view(-1, orig_shape[-1]) # (B*T, C)
+        
+        # Get routing logits
+        router_logits = self.gate(x_flat) # (B*T, n_experts)
+        
+        # Softmax to get routing probabilities
+        routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
+        
+        # Get top-k experts and their probabilities
+        routing_weights, selected_experts = torch.topk(routing_weights, self.num_experts_per_tok, dim=-1)
+        
+        # Normalize routing weights so they sum to 1 over the selected top-k
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        # Cast back to input dtype
+        routing_weights = routing_weights.to(x.dtype)
+        
+        final_hidden_states = torch.zeros_like(x_flat)
+        
+        # One-hot encode the selected experts to create masks: (B*T, top_k, n_experts)
+        expert_mask = F.one_hot(selected_experts, num_classes=self.n_experts).permute(2, 1, 0)
+        # shape: (n_experts, top_k, B*T)
+        
+        for expert_idx in range(self.n_experts):
+            expert_layer = self.experts[expert_idx]
+            
+            # Find tokens routed to this expert
+            idx, top_x = torch.where(expert_mask[expert_idx])
+            
+            if top_x.shape[0] == 0:
+                continue
+                
+            # Extract tokens for this expert
+            top_x_list = top_x.tolist() # Token indices in sequence (B*T)
+            idx_list = idx.tolist()     # Index in the top_k dimension (0, 1)
+            
+            # Get hidden states for these tokens
+            current_state = x_flat[top_x_list] # (num_tokens_for_expert, C)
+            
+            # Forward pass through the expert
+            current_hidden_states = expert_layer(current_state)
+            
+            # Weight the output by routing probability
+            current_hidden_states = current_hidden_states * routing_weights[top_x_list, idx_list, None]
+            
+            # Scatter back into the final result
+            final_hidden_states.index_add_(0, top_x, current_hidden_states.to(x.dtype))
+            
+        return final_hidden_states.view(orig_shape)
+
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
 
     def __init__(self, config: GPTConfig):
         super().__init__()
         self.sa = CausalSelfAttention(config)
-        self.ffwd = FeedForward(config)
+        if getattr(config, 'n_experts', 0) > 0:
+            self.ffwd = MoEBlock(config)
+        else:
+            self.ffwd = FeedForward(config)
         self.ln1 = RMSNorm(config.n_embd)
         self.ln2 = RMSNorm(config.n_embd)
 
