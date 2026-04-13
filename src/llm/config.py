@@ -13,6 +13,10 @@ class GPTConfig:
     bias: bool = False
     n_kv_head: int = 4            # GQA: 4 KV heads for 8 query heads (50% KV saving)
 
+    # MoE Config
+    n_experts: int = 0            # 0 = MoE disabled. > 0 = Number of experts
+    num_experts_per_tok: int = 2  # Number of experts to route each token to
+
     # LoRA Config
     lora_rank: int = 0            # 0 = LoRA disabled. >0 = LoRA enabled
     lora_alpha: int = 32
@@ -23,6 +27,8 @@ class GPTConfig:
             self.n_kv_head = self.n_head
         assert self.n_head % self.n_kv_head == 0, \
             f"n_head ({self.n_head}) must be divisible by n_kv_head ({self.n_kv_head})"
+        assert self.n_experts == 0 or self.num_experts_per_tok <= self.n_experts, \
+            f"num_experts_per_tok ({self.num_experts_per_tok}) must be <= n_experts ({self.n_experts})"
 
 @dataclass
 class TrainConfig:

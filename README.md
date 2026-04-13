@@ -7,11 +7,12 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 
 ## ✨ Key Features (Implemented)
 
-### 🏗️ Architecture ("Llama-fication")
+### 🏗️ Architecture ("Llama-fication" & "Mixtral-style")
 - **RMSNorm** (Root Mean Square Normalization): Replaces LayerNorm for better stability and performance.
 - **RoPE** (Rotary Positional Embeddings): Replaces absolute positional embeddings for better generalization to longer sequences.
 - **SwiGLU** (SiLU Gated Linear Unit): A more powerful activation function in the FeedForward network.
 - **Grouped Query Attention (GQA)**: Optimizes inference memory by sharing Key/Value heads across multiple Query heads (Llama 2/3 style).
+- **Mixture of Experts (MoE)**: Sparse routing mechanism for drastically increasing parameter count with constant compute (Mixtral 8x-style).
 
 ### 🛠️ Engineering
 - **Modular Codebase**: Separated into `config.py`, `model.py`, `train.py`, `tokenizer.py`.
