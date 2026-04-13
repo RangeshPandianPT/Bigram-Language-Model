@@ -62,7 +62,7 @@ def test_moe():
     out = moe_model.generate(x[:, :4], max_new_tokens=5, temperature=1.0)
     assert out.shape == (2, 9), f"Expected generated shape (2, 9), got {out.shape}"
     
-    print("\n✅ All MoE tests passed Successfully!")
+    print("\n[OK] All MoE tests passed Successfully!")
 
 if __name__ == "__main__":
     test_moe()
