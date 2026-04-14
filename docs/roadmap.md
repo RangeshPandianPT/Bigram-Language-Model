@@ -87,7 +87,17 @@ Making the model generate text faster and smarter.
 
 ---
 
-## Level 5: Deployment & Applications (Proposed Next Steps) ✅ COMPLETED
+## Level 5: Alignment & Advanced Inference ✅ COMPLETED
+
+### 1. Direct Preference Optimization (DPO) ✅
+- Implemented `train_dpo.py`! Much simpler to implement and more robust than RLHF using a Chosen/Rejected preference pipeline.
+
+### 2. Speculative Decoding ✅
+- Implemented `speculative_decode.py`! Predicts sequences using a tiny draft model and validates them in massive parallel batches via the large target model for 2-3x generation speedups.
+
+---
+
+## Level 6: Deployment & Applications (Proposed Next Steps) ✅ COMPLETED
 
 Since the core training and inference are complete, the next steps focus on serving the model and building applications.
 
