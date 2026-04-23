@@ -111,7 +111,7 @@ Since the core training and inference are complete, the next steps focus on serv
 
 ### 3. Instruction Fine-Tuning (SFT) & LoRA ✅
 - ✅ Added parameter-efficient fine-tuning (PEFT/LoRA) to efficiently adapt the base model
-- Prepare an instruction chat dataset (Pending)
+- ✅ Prepared an instruction chat dataset (Alpaca)
 
 ### 4. ONNX / GGUF Export ✅
 - ✅ Exported the PyTorch model to ONNX for fast inference on edge devices

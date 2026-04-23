@@ -12,8 +12,8 @@ from llm.paths import (
     LORA_WEIGHTS_PATH,
     MODEL_PATH,
     TOKENIZER_PREFIX,
-    TRAIN_BIN_PATH,
-    VAL_BIN_PATH,
+    CHAT_TRAIN_BIN_PATH,
+    CHAT_VAL_BIN_PATH,
     ensure_project_dirs,
 )
 
@@ -92,8 +92,8 @@ def train_lora():
     model.to(train_config.device)
     
     # Load data
-    train_data = np.memmap(TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
-    val_data = np.memmap(VAL_BIN_PATH, dtype=np.uint16, mode='r')
+    train_data = np.memmap(CHAT_TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
+    val_data = np.memmap(CHAT_VAL_BIN_PATH, dtype=np.uint16, mode='r')
     
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()), 
