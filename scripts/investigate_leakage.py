@@ -1,8 +1,11 @@
 import os
+from scripts._bootstrap import ROOT_DIR
+from llm.paths import INPUT_TEXT_PATH, LEAKAGE_REPORT_PATH, ensure_project_dirs
 
 def check_leakage():
+    ensure_project_dirs()
     output = []
-    with open('input.txt', 'r', encoding='utf-8') as f:
+    with open(INPUT_TEXT_PATH, 'r', encoding='utf-8') as f:
         data = f.read()
 
     n = len(data)
@@ -56,8 +59,9 @@ def check_leakage():
          indices = [m.start() for m in re.finditer(re.escape(sample), data)]
          output.append(f"Indices: {indices}")
     
-    with open('leakage_report.txt', 'w') as f:
+    with open(LEAKAGE_REPORT_PATH, 'w') as f:
         f.write('\n'.join(output))
+        print("Report written to:", LEAKAGE_REPORT_PATH)
 
 if __name__ == "__main__":
     check_leakage()
