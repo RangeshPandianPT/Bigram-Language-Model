@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import math
+from torch.utils.checkpoint import checkpoint
 from .config import GPTConfig
 
 class RMSNorm(nn.Module):
@@ -253,6 +254,10 @@ class GPTLanguageModel(nn.Module):
         self.ln_f = RMSNorm(config.n_embd) # final layer norm
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         
+        # Weight tying
+        if config.tie_word_embeddings:
+            self.lm_head.weight = self.token_embedding_table.weight
+        
         # Precompute RoPE frequencies
         head_dim = config.n_embd // config.n_head
         freqs_cos, freqs_sin = precompute_freqs_cis(head_dim, config.block_size)
@@ -279,7 +284,12 @@ class GPTLanguageModel(nn.Module):
         present_key_values = []
         for i, block in enumerate(self.blocks):
             past_kv = past_key_values[i] if past_key_values is not None else None
-            x, present_kv = block(x, freqs_cos, freqs_sin, past_kv)
+            
+            if self.training and getattr(self.config, 'gradient_checkpointing', False) and past_kv is None:
+                x, present_kv = checkpoint(block, x, freqs_cos, freqs_sin, past_kv, use_reentrant=False)
+            else:
+                x, present_kv = block(x, freqs_cos, freqs_sin, past_kv)
+                
             present_key_values.append(present_kv)
             
         x = self.ln_f(x) # (B,T,C)
@@ -296,7 +306,7 @@ class GPTLanguageModel(nn.Module):
         return logits, loss, present_key_values
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=0, top_p=1.0, repetition_penalty=1.0):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=0, top_p=1.0, min_p=0.0, repetition_penalty=1.0):
         """
         Generate text with advanced sampling strategies.
         
@@ -306,6 +316,7 @@ class GPTLanguageModel(nn.Module):
             temperature: sampling temperature (higher = more random)
             top_k: if > 0, only sample from top k tokens
             top_p: if < 1.0, nucleus sampling (sample from smallest set with cumulative prob >= p)
+            min_p: if > 0.0, sample from tokens with prob >= min_p * max(prob)
             repetition_penalty: if > 1.0, penalize repeated tokens
         """
         past_key_values = None
@@ -336,6 +347,13 @@ class GPTLanguageModel(nn.Module):
             if top_k > 0:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float('Inf')
+            
+            # Apply min-p filtering
+            if min_p > 0.0:
+                probs = F.softmax(logits, dim=-1)
+                max_probs = probs.max(dim=-1, keepdim=True).values
+                tokens_to_remove = probs < (min_p * max_probs)
+                logits[tokens_to_remove] = -float('Inf')
             
             # Apply top-p (nucleus) filtering
             if top_p < 1.0:
