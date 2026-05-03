@@ -21,6 +21,9 @@ class GPTConfig:
     lora_rank: int = 0            # 0 = LoRA disabled. >0 = LoRA enabled
     lora_alpha: int = 32
     lora_dropout: float = 0.05
+    
+    # Weight Tying
+    tie_word_embeddings: bool = False
 
     def __post_init__(self):
         if self.n_kv_head is None:
@@ -45,10 +48,12 @@ class TrainConfig:
     warmup_iters: int = 200      # longer warmup for larger model (was 100)
     lr_decay_iters: int = 5000   # aligned with max_iters (was 2000)
     min_lr: float = 3e-5         # Minimum learning rate
+    gradient_checkpointing: bool = False # memory savings during training
 
 @dataclass
 class SamplingConfig:
     temperature: float = 1.0  # Higher = more random, lower = more deterministic
     top_k: int = 0  # 0 = disabled, else sample from top k tokens
     top_p: float = 1.0  # 1.0 = disabled, else nucleus sampling
+    min_p: float = 0.0  # 0.0 = disabled, else min-p sampling
     repetition_penalty: float = 1.0  # 1.0 = no penalty, >1.0 = penalize repetition
