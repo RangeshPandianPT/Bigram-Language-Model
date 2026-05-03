@@ -16,3 +16,7 @@ sentencepiece
 # Edge Deployment
 onnx
 onnxruntime
+
+# Evaluation Suite
+datasets
+tqdm
