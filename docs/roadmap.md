@@ -130,9 +130,9 @@ Now that the core LLM, fine-tuning pipeline, and deployment are complete, the pr
 - **Goal:** Turn the model from a passive text generator into an active agent.
 - **Tasks:** Fine-tune the model to output structured JSON commands, build an execution engine in the backend for things like web search or python execution, and implement a ReAct loop.
 
-### Path C: Retrieval-Augmented Generation (RAG)
+### Path C: Retrieval-Augmented Generation (RAG) ✅
 - **Goal:** Enable the model to read external documents and answer questions using proprietary or up-to-date data.
-- **Tasks:** Integrate a vector database (e.g., FAISS or Chroma), implement document chunking, and modify the inference pipeline to inject retrieved context.
+- **Tasks:** ✅ Integrated `faiss-cpu` and `sentence-transformers`, implemented `TextChunker` and `VectorStore`, and created the `chat_rag.py` pipeline for context-augmented generation.
 
 ### Path D: Next-Gen Architecture (Mamba/SSM)
 - **Goal:** Explore alternatives to the standard Transformer attention mechanism.
