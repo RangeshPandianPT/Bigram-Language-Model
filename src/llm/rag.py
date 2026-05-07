@@ -74,3 +74,47 @@ class TextChunker:
                 
         return chunks
 
+class VectorStore:
+    """A wrapper for sentence-transformers and faiss to embed and retrieve chunks."""
+    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+        if faiss is None or SentenceTransformer is None:
+            raise ImportError("Please install faiss-cpu and sentence-transformers to use VectorStore.")
+        
+        self.embedder = SentenceTransformer(model_name)
+        self.dimension = self.embedder.get_sentence_embedding_dimension()
+        # Flat L2 (Euclidean distance) index
+        self.index = faiss.IndexFlatL2(self.dimension)
+        self.chunks: List[Dict[str, str]] = []
+
+    def ingest(self, chunks: List[Dict[str, str]]):
+        """Embed chunks and add them to the Faiss index."""
+        if not chunks:
+            return
+            
+        texts = [chunk["content"] for chunk in chunks]
+        print(f"Embedding {len(texts)} chunks...")
+        embeddings = self.embedder.encode(texts, convert_to_numpy=True)
+        
+        # Add to index
+        self.index.add(embeddings)
+        self.chunks.extend(chunks)
+        print(f"Index now contains {self.index.ntotal} chunks.")
+
+    def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """Search for the most relevant chunks."""
+        if self.index.ntotal == 0:
+            return []
+            
+        query_embedding = self.embedder.encode([query], convert_to_numpy=True)
+        distances, indices = self.index.search(query_embedding, top_k)
+        
+        results = []
+        for dist, idx in zip(distances[0], indices[0]):
+            if idx != -1:  # -1 means no result found
+                chunk = self.chunks[idx]
+                results.append({
+                    "content": chunk["content"],
+                    "source": chunk["source"],
+                    "distance": float(dist)
+                })
+        return results
