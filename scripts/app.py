@@ -11,6 +11,9 @@ from llm.config import GPTConfig, SamplingConfig
 from llm.model import GPTLanguageModel
 from llm.tokenizer import BPETokenizer
 from llm.paths import MODEL_BEST_PATH, MODEL_PATH, TOKENIZER_PREFIX
+from llm.rag import DocumentLoader, TextChunker, VectorStore
+from scripts.speculative_decode import speculative_decode
+import time
 
 # ─────────────────────────────────────────────
 # Load model and tokenizer on startup
@@ -39,7 +42,35 @@ params = sum(p.numel() for p in model.parameters()) / 1e6
 print(f"Model: {config.n_layer}L / {config.n_embd}E / {config.n_head}H | {params:.2f}M params | device={DEVICE}")
 
 # ─────────────────────────────────────────────
-# Generation function
+# Initialize RAG VectorStore
+# ─────────────────────────────────────────────
+vector_store = None
+doc_dir = os.path.join(ROOT_DIR, 'data', 'documents')
+try:
+    if os.path.exists(doc_dir):
+        loader = DocumentLoader()
+        docs = loader.load_directory(doc_dir)
+        if docs:
+            chunker = TextChunker()
+            chunks = []
+            for doc in docs:
+                chunks.extend(chunker.chunk_document(doc))
+            vector_store = VectorStore()
+            vector_store.ingest(chunks)
+            print(f"✅ RAG VectorStore initialized with {len(chunks)} chunks.")
+except Exception as e:
+    print(f"⚠️ RAG VectorStore failed to initialize: {e}")
+
+# ─────────────────────────────────────────────
+# Initialize Draft Model for Speculative Decoding
+# ─────────────────────────────────────────────
+draft_config = GPTConfig(n_layer=2, n_embd=64, n_head=2, vocab_size=config.vocab_size)
+draft_model = GPTLanguageModel(draft_config).to(DEVICE)
+draft_model.eval()
+print(f"✅ Draft Model initialized for Speculative Decoding.")
+
+# ─────────────────────────────────────────────
+# Generation functions
 # ─────────────────────────────────────────────
 @torch.no_grad()
 def generate_text(
@@ -78,6 +109,54 @@ def generate_text(
     except Exception as e:
         return f"❌ Error during generation: {e}"
 
+@torch.no_grad()
+def generate_rag(prompt: str, max_new_tokens: int, temperature: float, top_p: float):
+    if not prompt.strip(): return "⚠️ Please enter a prompt."
+    if not vector_store: return "⚠️ VectorStore not initialized. Please add .txt files to data/documents."
+    
+    try:
+        results = vector_store.search(prompt, top_k=3)
+        context_str = "\n".join([res['content'] for res in results]) if results else ""
+        
+        full_prompt = (
+            "Use the following context to answer the question.\n\n"
+            f"Context:\n{context_str}\n\nQuestion: {prompt}\nAnswer:"
+        ) if context_str else f"Question: {prompt}\nAnswer:"
+
+        tokens = tokenizer.encode(full_prompt)
+        idx = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+        
+        output_ids = model.generate(idx, max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p)
+        generated_only = tokenizer.decode(output_ids[0, len(tokens):].tolist())
+        
+        return f"**Context Retrieved:**\n{context_str}\n\n**Answer:**\n{generated_only.strip()}"
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+@torch.no_grad()
+def generate_speculative(prompt: str, max_new_tokens: int):
+    if not prompt.strip(): return "⚠️ Please enter a prompt."
+    try:
+        tokens = tokenizer.encode(prompt)
+        idx = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
+        
+        t0 = time.time()
+        std_out = model.generate(idx, max_new_tokens=max_new_tokens)[0]
+        std_time = time.time() - t0
+        
+        t0 = time.time()
+        spec_out = speculative_decode(model, draft_model, idx, tokenizer, max_new_tokens=max_new_tokens)[0]
+        spec_time = time.time() - t0
+        
+        std_text = tokenizer.decode(std_out[len(tokens):].tolist())
+        spec_text = tokenizer.decode(spec_out[len(tokens):].tolist())
+        
+        return (f"**Standard Generation ({std_time:.2f}s):**\n{std_text}\n\n"
+                f"**Speculative Decoding ({spec_time:.2f}s):**\n{spec_text}\n\n"
+                f"*Speedup: {std_time/spec_time:.2f}x*")
+    except Exception as e:
+        return f"❌ Error: {e}"
+
 # ─────────────────────────────────────────────
 # Gradio UI
 # ─────────────────────────────────────────────
@@ -86,86 +165,45 @@ CSS = """
 #output-box textarea { font-family: 'Georgia', serif; font-size: 15px; line-height: 1.7; }
 """
 
-with gr.Blocks(
-    title="GPT Language Model Demo",
-    theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="purple"),
-    css=CSS,
-) as demo:
+with gr.Blocks(title="GPT Language Model Demo", theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="purple"), css=CSS) as demo:
+    gr.Markdown("# 🧠 GPT Language Model — Interactive Demo\nA **LLaMA-style** GPT trained on Shakespeare — featuring RMSNorm, RoPE, SwiGLU, GQA, RAG, & Speculative Decoding.", elem_id="header")
 
-    gr.Markdown(
-        """
-        # 🧠 GPT Language Model — Interactive Demo
-        A **LLaMA-style** GPT trained on Shakespeare — featuring RMSNorm, RoPE, SwiGLU, GQA & KV Cache.
-        """,
-        elem_id="header",
-    )
-
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### ⚙️ Generation Settings")
-
-            temperature = gr.Slider(
-                0.1, 2.0, value=0.8, step=0.05,
-                label="🌡️ Temperature",
-                info="Higher = more creative / random. Lower = more focused.",
-            )
-            top_k = gr.Slider(
-                0, 100, value=40, step=1,
-                label="🔝 Top-K",
-                info="Keep only top K tokens each step. 0 = disabled.",
-            )
-            top_p = gr.Slider(
-                0.1, 1.0, value=0.9, step=0.01,
-                label="🎯 Top-P (Nucleus)",
-                info="Cumulative probability cutoff. 1.0 = disabled.",
-            )
-            rep_penalty = gr.Slider(
-                1.0, 2.0, value=1.2, step=0.05,
-                label="🔁 Repetition Penalty",
-                info="Penalizes repeated tokens. 1.0 = no penalty.",
-            )
-            max_tokens = gr.Slider(
-                10, 300, value=100, step=10,
-                label="📏 Max New Tokens",
-            )
-
-        with gr.Column(scale=2):
-            gr.Markdown("### ✍️ Prompt & Output")
-
-            prompt_box = gr.Textbox(
-                label="Prompt",
-                placeholder="Enter your starting text here…",
-                lines=4,
-                value="ROMEO:\nWhat light through yonder window breaks",
-            )
-
-            output_box = gr.Textbox(
-                label="Generated Text  (prompt + [GENERATED:] continuation)",
-                lines=12,
-                interactive=False,
-                elem_id="output-box",
-            )
-
+    with gr.Tabs():
+        with gr.TabItem("✍️ Text Generation"):
             with gr.Row():
-                generate_btn = gr.Button("🚀 Generate", variant="primary", scale=2)
-                clear_btn = gr.Button("🗑️ Clear", scale=1)
+                with gr.Column(scale=1):
+                    temperature = gr.Slider(0.1, 2.0, value=0.8, step=0.05, label="🌡️ Temperature")
+                    top_k = gr.Slider(0, 100, value=40, step=1, label="🔝 Top-K")
+                    top_p = gr.Slider(0.1, 1.0, value=0.9, step=0.01, label="🎯 Top-P")
+                    rep_penalty = gr.Slider(1.0, 2.0, value=1.2, step=0.05, label="🔁 Repetition Penalty")
+                    max_tokens = gr.Slider(10, 300, value=100, step=10, label="📏 Max Tokens")
+                with gr.Column(scale=2):
+                    prompt_box = gr.Textbox(label="Prompt", value="ROMEO:\nWhat light through yonder window breaks")
+                    output_box = gr.Textbox(label="Generated Text", interactive=False, lines=10)
+                    gen_btn = gr.Button("🚀 Generate", variant="primary")
+            gen_btn.click(generate_text, [prompt_box, max_tokens, temperature, top_k, top_p, rep_penalty], output_box)
 
-    gr.Markdown(
-        f"""
-        ---
-        **Model specs:** `{config.n_layer}` layers · `{config.n_embd}` embed dim · \
-`{config.n_head}` query heads · `{config.n_kv_head}` KV heads (GQA) · \
-`{config.block_size}` context · **{params:.2f}M params** · device: `{DEVICE}`
-        """,
-    )
+        with gr.TabItem("📚 Chat with Docs (RAG)"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    rag_max_tokens = gr.Slider(10, 300, value=150, step=10, label="📏 Max Tokens")
+                    rag_temperature = gr.Slider(0.1, 2.0, value=0.7, step=0.05, label="🌡️ Temperature")
+                    rag_top_p = gr.Slider(0.1, 1.0, value=0.9, step=0.01, label="🎯 Top-P")
+                with gr.Column(scale=2):
+                    rag_prompt = gr.Textbox(label="Question", placeholder="Ask something about your documents...")
+                    rag_output = gr.Textbox(label="Answer & Context", interactive=False, lines=10)
+                    rag_btn = gr.Button("🔍 Retrieve & Generate", variant="primary")
+            rag_btn.click(generate_rag, [rag_prompt, rag_max_tokens, rag_temperature, rag_top_p], rag_output)
 
-    # Wire up buttons
-    generate_btn.click(
-        fn=generate_text,
-        inputs=[prompt_box, max_tokens, temperature, top_k, top_p, rep_penalty],
-        outputs=output_box,
-    )
-    clear_btn.click(fn=lambda: ("", ""), outputs=[prompt_box, output_box])
+        with gr.TabItem("⚡ Speculative Decoding"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    spec_max_tokens = gr.Slider(10, 300, value=50, step=10, label="📏 Max Tokens")
+                with gr.Column(scale=2):
+                    spec_prompt = gr.Textbox(label="Prompt", value="The future of artificial intelligence is")
+                    spec_output = gr.Textbox(label="Comparison", interactive=False, lines=10)
+                    spec_btn = gr.Button("🏎️ Test Speed", variant="primary")
+            spec_btn.click(generate_speculative, [spec_prompt, spec_max_tokens], spec_output)
 
 if __name__ == "__main__":
     demo.launch(share=False, server_name="0.0.0.0", server_port=7860)
