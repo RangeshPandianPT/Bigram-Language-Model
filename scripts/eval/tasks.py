@@ -29,7 +29,19 @@ class PIQATask(EvalTask):
         label = example["label"]
         return context, choices, label
 
+class MMLUTask(EvalTask):
+    def get_dataset(self, split='test'):
+        # MMLU typically uses test split for evaluation
+        return load_dataset("cais/mmlu", "all", split=split)
+        
+    def format_example(self, example):
+        context = example["question"]
+        choices = example["choices"]
+        label = example["answer"]
+        return context, choices, label
+
 TASKS = {
     "hellaswag": HellaSwagTask,
-    "piqa": PIQATask
+    "piqa": PIQATask,
+    "mmlu": MMLUTask
 }
