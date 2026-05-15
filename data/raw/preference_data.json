@@ -1,0 +1,17 @@
+[
+    {
+        "prompt": "What is the capital of France?",
+        "chosen": " The capital of France is Paris.",
+        "rejected": " I don't know, maybe London or Berlin?"
+    },
+    {
+        "prompt": "Explain quantum computing in simple terms.",
+        "chosen": " Quantum computing uses quantum bits or qubits to process information in ways that normal computers cannot, allowing it to solve complex problems much faster.",
+        "rejected": " Quantum computing is a thing where you put cats in boxes and they are dead and alive and computers go beep boop very fast."
+    },
+    {
+        "prompt": "Can you write a python script to reverse a string?",
+        "chosen": " Yes! Here is a simple python script:\n```python\ntext = 'hello'\nprint(text[::-1])\n```",
+        "rejected": " No, Python does not support strings, use C++ instead."
+    }
+]
