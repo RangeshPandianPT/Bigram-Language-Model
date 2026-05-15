@@ -67,33 +67,41 @@ def compute_dpo_loss(
     
     return loss, chosen_rewards.mean(), rejected_rewards.mean(), reward_accuracies
 
-def generate_mock_preference_data(tokenizer, num_samples=100, max_len=64):
+import json
+import os
+
+def load_or_generate_preference_data(tokenizer, num_samples=100, max_len=64):
     """
-    Generates dummy preference dataset for demonstration.
-    Returns: chosen_inputs, chosen_labels, rejected_inputs, rejected_labels
+    Loads preference dataset from json if it exists, otherwise generates dummy data.
     """
-    print("Generating mock preference data...")
-    # In practice, you would load Anthropic/hh-rlhf or a similar dataset
     data = []
+    data_path = os.path.join(ROOT_DIR, "data", "raw", "preference_data.json")
     
-    prompt_text = "The quick brown fox"
-    chosen_resp = " jumps over the lazy dog completely avoiding the sleeping cat."
-    rejected_resp = " runs away fast and gets lost in the giant dark forest."
-    
-    p_ids = tokenizer.encode(prompt_text)
-    c_ids = tokenizer.encode(chosen_resp)
-    r_ids = tokenizer.encode(rejected_resp)
-    
-    # Format: [prompt_ids] + [response_ids]
-    # Labels mask the prompt_ids by setting them to -100
-    for _ in range(num_samples):
+    if os.path.exists(data_path):
+        print(f"Loading preference data from {data_path}...")
+        with open(data_path, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+    else:
+        print("Generating mock preference data...")
+        raw_data = [
+            {
+                "prompt": "The quick brown fox",
+                "chosen": " jumps over the lazy dog completely avoiding the sleeping cat.",
+                "rejected": " runs away fast and gets lost in the giant dark forest."
+            }
+        ] * num_samples
+        
+    for item in raw_data:
+        p_ids = tokenizer.encode(item["prompt"])
+        c_ids = tokenizer.encode(item["chosen"])
+        r_ids = tokenizer.encode(item["rejected"])
+        
         chosen_seq = p_ids + c_ids
         chosen_lab = [-100] * len(p_ids) + c_ids
         
         rejected_seq = p_ids + r_ids
         rejected_lab = [-100] * len(p_ids) + r_ids
         
-        # Pad to max_len
         if len(chosen_seq) < max_len:
             chosen_seq += [0] * (max_len - len(chosen_seq))
             chosen_lab += [-100] * (max_len - len(chosen_lab))
@@ -108,6 +116,11 @@ def generate_mock_preference_data(tokenizer, num_samples=100, max_len=64):
             'rejected_x': torch.tensor(rejected_seq[:max_len], dtype=torch.long),
             'rejected_y': torch.tensor(rejected_lab[:max_len], dtype=torch.long),
         })
+        
+    # Duplicate data if we loaded a tiny json file but requested more samples for training demonstration
+    while len(data) < num_samples:
+        data.extend(data[:num_samples - len(data)])
+        
     return data
 
 def train_dpo():
@@ -150,7 +163,7 @@ def train_dpo():
     scaler = torch.cuda.amp.GradScaler(enabled=config.use_amp)
     
     # Get preference data
-    pref_data = generate_mock_preference_data(tokenizer, num_samples=200, max_len=config.block_size)
+    pref_data = load_or_generate_preference_data(tokenizer, num_samples=200, max_len=config.block_size)
     
     for epoch in range(config.dpo_epochs):
         np.random.shuffle(pref_data)
