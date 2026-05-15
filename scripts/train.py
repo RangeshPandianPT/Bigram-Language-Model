@@ -63,24 +63,28 @@ def estimate_loss(model, train_data, val_data, config):
     model.train()
     return out
 
-def train():
+def train(model=None, train_config=None, gpt_config=None):
     ensure_project_dirs()
 
     # Load config
-    train_config = TrainConfig()
-    gpt_config = GPTConfig()
+    if train_config is None:
+        train_config = TrainConfig()
+    if gpt_config is None and model is None:
+        gpt_config = GPTConfig()
     
     # Load tokenizer
     tokenizer = BPETokenizer()
     tokenizer.load(str(TOKENIZER_PREFIX))
-    gpt_config.vocab_size = len(tokenizer.vocab)
+    if gpt_config is not None:
+        gpt_config.vocab_size = len(tokenizer.vocab)
     
     # Load data
     train_data = np.memmap(TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
     val_data = np.memmap(VAL_BIN_PATH, dtype=np.uint16, mode='r')
     
     # Initialize model
-    model = GPTLanguageModel(gpt_config)
+    if model is None:
+        model = GPTLanguageModel(gpt_config)
     
     if torch.cuda.device_count() > 1:
         print(f"Let's use {torch.cuda.device_count()} GPUs!")
@@ -124,9 +128,9 @@ def train():
                 print(f"Saved best model with val loss {best_val_loss:.4f}")
         
         # Sample a batch of data
-        ix = torch.randint(len(train_data) - gpt_config.block_size, (train_config.batch_size,))
-        x = torch.stack([torch.from_numpy((train_data[i:i+gpt_config.block_size]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((train_data[i+1:i+1+gpt_config.block_size]).astype(np.int64)) for i in ix])
+        ix = torch.randint(len(train_data) - model.config.block_size, (train_config.batch_size,))
+        x = torch.stack([torch.from_numpy((train_data[i:i+model.config.block_size]).astype(np.int64)) for i in ix])
+        y = torch.stack([torch.from_numpy((train_data[i+1:i+1+model.config.block_size]).astype(np.int64)) for i in ix])
         x, y = x.to(train_config.device), y.to(train_config.device)
         
         # Forward pass with mixed precision
