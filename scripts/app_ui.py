@@ -4,7 +4,8 @@ import json
 import time
 
 # Configuration
-API_URL = "http://localhost:8000/generate"\nINGEST_URL = "http://localhost:8000/ingest"
+API_URL = "http://localhost:8000/generate"
+INGEST_URL = "http://localhost:8000/ingest"
 
 st.set_page_config(
     page_title="Bigram LLM Chat",
@@ -80,7 +81,9 @@ if prompt := st.chat_input("What is up?"):
             "temperature": temperature,
             "top_k": top_k,
             "top_p": top_p,
-            "repetition_penalty": repetition_penalty
+            "repetition_penalty": repetition_penalty,
+            "use_speculative_decoding": use_speculative_decoding,
+            "use_rag": use_rag
         }
         
         try:
