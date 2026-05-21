@@ -41,6 +41,27 @@ async def lifespan(app: FastAPI):
         model.to(device)
         model.eval()
         print("Model loaded successfully!")
+        
+        # Initialize Vector Store
+        global vector_store
+        try:
+            vector_store = VectorStore()
+            print("VectorStore initialized.")
+        except ImportError as e:
+            print(f"VectorStore error: {e}")
+            
+        # Load draft model for speculative decoding
+        global draft_model
+        try:
+            draft_config = GPTConfig(n_layer=2, n_embd=64, n_head=2)
+            draft_config.vocab_size = gpt_config.vocab_size
+            draft_model = GPTLanguageModel(draft_config)
+            draft_model.to(device)
+            draft_model.eval()
+            print("Draft model initialized (using random weights for demo).")
+        except Exception as e:
+            print(f"Error loading draft model: {e}")
+            
     except Exception as e:
         print(f"Error loading model: {e}")
         # In a real app we might want to exit here, but for development let's allow it to start up
