@@ -9,11 +9,15 @@ from llm.tokenizer import BPETokenizer
 from llm.config import GPTConfig, TrainConfig
 from llm.model import GPTLanguageModel
 from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
+from llm.rag import DocumentLoader, TextChunker, VectorStore
+from scripts.speculative_decode import speculative_decode
 
 # Global variables to hold our model and tokenizer
 model = None
+draft_model = None
 tokenizer = None
 device = None
+vector_store = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
