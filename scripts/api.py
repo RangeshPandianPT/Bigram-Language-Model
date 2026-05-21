@@ -18,6 +18,7 @@ draft_model = None
 tokenizer = None
 device = None
 vector_store = None
+device = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -79,6 +80,11 @@ class GenerateRequest(BaseModel):
     top_k: int = 0
     top_p: float = 1.0
     repetition_penalty: float = 1.0
+    use_speculative_decoding: bool = False
+    use_rag: bool = False
+
+class IngestRequest(BaseModel):
+    doc_dir: str
 
 class GenerateResponse(BaseModel):
     prompt: str
@@ -94,9 +100,30 @@ def read_health():
     return {
         "status": "ok",
         "model_loaded": model is not None,
+        "draft_model_loaded": draft_model is not None,
         "tokenizer_loaded": tokenizer is not None,
+        "vector_store_loaded": vector_store is not None,
         "device": str(device) if device is not None else None,
     }
+
+@app.post("/ingest")
+def ingest_documents(request: IngestRequest):
+    global vector_store
+    if vector_store is None:
+        raise HTTPException(status_code=500, detail="VectorStore not initialized.")
+    
+    loader = DocumentLoader()
+    docs = loader.load_directory(request.doc_dir)
+    if not docs:
+        raise HTTPException(status_code=400, detail=f"No documents found in {request.doc_dir}")
+        
+    chunker = TextChunker()
+    chunks = []
+    for doc in docs:
+        chunks.extend(chunker.chunk_document(doc))
+        
+    vector_store.ingest(chunks)
+    return {"status": "success", "chunks_ingested": len(chunks)}
 
 @app.post("/generate", response_model=GenerateResponse)
 def generate_text(request: GenerateRequest):
@@ -104,9 +131,27 @@ def generate_text(request: GenerateRequest):
         raise HTTPException(status_code=503, detail="Model is not loaded yet or failed to load.")
     
     try:
+        final_prompt = request.prompt
+        
+        # 1. RAG Context Retrieval
+        if request.use_rag and vector_store is not None and request.prompt:
+            results = vector_store.search(request.prompt, top_k=3)
+            context_str = ""
+            for res in results:
+                context_str += f"{res['content']}\n\n"
+            
+            if context_str:
+                final_prompt = (
+                    "Use the following pieces of context to answer the question at the end.\n"
+                    "If you don't know the answer, just say that you don't know.\n\n"
+                    f"Context:\n{context_str}\n"
+                    f"Question: {request.prompt}\n"
+                    "Answer:"
+                )
+                
         # Encode the prompt
-        if request.prompt:
-            prompt_ids = tokenizer.encode(request.prompt)
+        if final_prompt:
+            prompt_ids = tokenizer.encode(final_prompt)
             context = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         else:
             context = torch.zeros((1, 1), dtype=torch.long, device=device)
@@ -115,16 +160,28 @@ def generate_text(request: GenerateRequest):
         
         # Generate
         with torch.no_grad(): # good practice to use no_grad for inference
-            generated_indices = model.generate(
-                context, 
-                max_new_tokens=request.max_tokens,
-                temperature=request.temperature,
-                top_k=request.top_k,
-                top_p=request.top_p,
-                repetition_penalty=request.repetition_penalty
-            )[0].tolist()
+            if request.use_speculative_decoding and draft_model is not None:
+                generated_indices = speculative_decode(
+                    model, draft_model, context, tokenizer,
+                    max_new_tokens=request.max_tokens,
+                    temperature=request.temperature
+                )[0].tolist()
+            else:
+                generated_indices = model.generate(
+                    context, 
+                    max_new_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    top_k=request.top_k,
+                    top_p=request.top_p,
+                    repetition_penalty=request.repetition_penalty
+                )[0].tolist()
             
-        generated_text = tokenizer.decode(generated_indices)
+        # Extract only the newly generated text for RAG to look clean
+        if request.use_rag and final_prompt != request.prompt:
+            new_indices = generated_indices[len(prompt_ids):]
+            generated_text = tokenizer.decode(new_indices)
+        else:
+            generated_text = tokenizer.decode(generated_indices)
         
         return GenerateResponse(prompt=request.prompt, generated_text=generated_text)
     
