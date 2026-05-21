@@ -4,7 +4,7 @@ import json
 import time
 
 # Configuration
-API_URL = "http://localhost:8000/generate"
+API_URL = "http://localhost:8000/generate"\nINGEST_URL = "http://localhost:8000/ingest"
 
 st.set_page_config(
     page_title="Bigram LLM Chat",
@@ -28,6 +28,25 @@ with st.sidebar:
                       help="Nucleus sampling threshold (1.0 to disable).")
     repetition_penalty = st.slider("Repetition Penalty", min_value=1.0, max_value=2.0, value=1.0, step=0.05,
                                   help="Penalize repeated tokens (1.0 means no penalty).")
+
+    st.markdown("---")
+    st.header("Advanced Features")
+    use_speculative_decoding = st.toggle("Enable Speculative Decoding", value=False, help="Use a smaller draft model to speed up generation")
+    use_rag = st.toggle("Enable RAG Context", value=False, help="Retrieve context from documents before generation")
+    
+    if use_rag:
+        st.markdown("### Document Ingestion")
+        doc_dir = st.text_input("Document Directory", value="data/documents", help="Path to directory containing .txt or .md files")
+        if st.button("Ingest Documents"):
+            try:
+                with st.spinner("Ingesting..."):
+                    res = requests.post(INGEST_URL, json={"doc_dir": doc_dir})
+                if res.status_code == 200:
+                    st.success(f"Ingested {res.json().get('chunks_ingested', 0)} chunks!")
+                else:
+                    st.error(f"Error: {res.text}")
+            except Exception as e:
+                st.error(f"Connection failed: {e}")
 
     st.markdown("---")
     st.markdown("Status: Wait for the API server to be running before sending messages.")
