@@ -7,6 +7,10 @@ from llm.model import GPTLanguageModel
 from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 from llm.agent import Agent, Tool
 
+import urllib.request
+import urllib.parse
+import json
+
 def evaluate_math(expression):
     # Safe evaluate for basic math
     allowed_chars = "0123456789+-*/(). "
@@ -17,9 +21,22 @@ def evaluate_math(expression):
     except Exception as e:
         return f"Error: {e}"
 
-def search_weather(location):
-    # Mock weather tool
-    return f"The weather in {location} is currently 72°F and sunny."
+def search_wikipedia(query):
+    try:
+        url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(query)}&utf8=&format=json"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            if data['query']['search']:
+                snippet = data['query']['search'][0]['snippet']
+                # clean basic HTML tags from snippet
+                snippet = snippet.replace('<span class="searchmatch">', '').replace('</span>', '')
+                snippet = snippet.replace('&quot;', '"').replace('&#039;', "'")
+                return f"Wikipedia Search Result: {snippet}..."
+            else:
+                return "No results found on Wikipedia."
+    except Exception as e:
+        return f"Error searching Wikipedia: {e}"
 
 def main():
     parser = argparse.ArgumentParser(description='Run agentic chat')
@@ -43,7 +60,7 @@ def main():
     
     tools = [
         Tool("Calculator", "Evaluates basic math expressions", evaluate_math),
-        Tool("Weather", "Gets current weather for a location", search_weather)
+        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia)
     ]
     
     agent = Agent(model, tokenizer, device, tools=tools)
