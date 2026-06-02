@@ -126,9 +126,9 @@ Now that the core LLM, fine-tuning pipeline, and deployment are complete, the pr
 - **Goal:** Give the model "eyes" by integrating an image encoder.
 - **Tasks:** Implement a vision encoder (like CLIP), build a projection layer to map image tokens to the LLM's embedding space, and fine-tune on an image-text dataset (similar to the LLaVA architecture).
 
-### Path B: Tool Use & Function Calling (Agentic LLM)
+### Path B: Tool Use & Function Calling (Agentic LLM) ✅
 - **Goal:** Turn the model from a passive text generator into an active agent.
-- **Tasks:** Fine-tune the model to output structured JSON commands, build an execution engine in the backend for things like web search or python execution, and implement a ReAct loop.
+- **Tasks:** ✅ Implemented `Agent` class and a ReAct loop. Integrated functional tools like Calculator (eval) and Wikipedia Search API in `agent_chat.py`.
 
 ### Path C: Retrieval-Augmented Generation (RAG) ✅
 - **Goal:** Enable the model to read external documents and answer questions using proprietary or up-to-date data.
@@ -138,6 +138,6 @@ Now that the core LLM, fine-tuning pipeline, and deployment are complete, the pr
 - **Goal:** Explore alternatives to the standard Transformer attention mechanism.
 - **Tasks:** Implement a State Space Model (SSM) block like Mamba, which allows for linear scaling with sequence length rather than quadratic.
 
-### Path E: Automated Benchmarking & Eval Suite
+### Path E: Automated Benchmarking & Eval Suite ✅
 - **Goal:** Scientifically measure the model's intelligence and track regressions.
-- **Tasks:** Integrate standard benchmarks (e.g., MMLU, GSM8k, HumanEval) to automatically evaluate the model's capabilities objectively.
+- **Tasks:** ✅ Integrated standard benchmarks (PIQA, MMLU, ARC Challenge, TruthfulQA) in `scripts/eval/run_evals.py` to automatically evaluate the model's capabilities.
