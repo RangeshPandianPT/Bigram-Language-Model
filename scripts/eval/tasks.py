@@ -40,8 +40,36 @@ class MMLUTask(EvalTask):
         label = example["answer"]
         return context, choices, label
 
+class ARCTask(EvalTask):
+    def get_dataset(self, split='validation'):
+        return load_dataset("ai2_arc", "ARC-Challenge", split=split)
+        
+    def format_example(self, example):
+        context = example["question"]
+        choices = example["choices"]["text"]
+        label_str = example["answerKey"]
+        
+        # ARC answers are sometimes 'A', 'B', 'C', 'D' or '1', '2', '3', '4'
+        labels_map = {l: i for i, l in enumerate(example["choices"]["label"])}
+        label = labels_map.get(label_str, -1)
+        return context, choices, label
+
+class TruthfulQATask(EvalTask):
+    def get_dataset(self, split='validation'):
+        return load_dataset("truthful_qa", "multiple_choice", split=split)
+        
+    def format_example(self, example):
+        context = example["question"]
+        choices = example["mc1_targets"]["choices"]
+        labels = example["mc1_targets"]["labels"]
+        # In TruthfulQA mc1, there is only one correct answer (label == 1)
+        label = labels.index(1) if 1 in labels else -1
+        return context, choices, label
+
 TASKS = {
     "hellaswag": HellaSwagTask,
     "piqa": PIQATask,
-    "mmlu": MMLUTask
+    "mmlu": MMLUTask,
+    "arc": ARCTask,
+    "truthfulqa": TruthfulQATask
 }
