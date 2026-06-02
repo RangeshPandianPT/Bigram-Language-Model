@@ -37,6 +37,7 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 | `app.py` | 🌐 Gradio web demo |
 | `tokenizer.py` | BPE tokenizer wrapper |
 | `prepare_data.py` | Tokenizes raw text → `train.bin` / `val.bin` |
+| `prepare_dpo_data.py` | Fetches Anthropic HH-RLHF dataset for alignment |
 | `test_gqa.py` | GQA unit tests (KV param reduction + output shape) |
 
 ## ⚡ Quick Start
@@ -81,12 +82,18 @@ Then open [http://localhost:7860](http://localhost:7860) in your browser.
 | 🔁 Repetition Penalty | Discourages repeating tokens |
 | 📏 Max New Tokens | How many tokens to generate |
 
-## 🧪 Testing
+## 🧪 Testing & Evaluation
 
 ```bash
 python test_gqa.py        # GQA correctness: KV param reduction + output shape
 python test_kv_cache.py   # KV Cache: verify cached == uncached outputs + speedup
 python test_new_features.py  # Mixed precision, sampling strategies, LR scheduler
+```
+
+### Model Benchmarks
+Run standard zero-shot / few-shot evaluations to measure reasoning:
+```bash
+python scripts/eval/run_evals.py --tasks piqa,arc,truthfulqa,mmlu
 ```
 
 ## 📜 License
