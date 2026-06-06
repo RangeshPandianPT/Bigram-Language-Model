@@ -57,9 +57,16 @@ async def lifespan(app: FastAPI):
             draft_config = GPTConfig(n_layer=2, n_embd=64, n_head=2)
             draft_config.vocab_size = gpt_config.vocab_size
             draft_model = GPTLanguageModel(draft_config)
+            
+            draft_path = MODEL_PATH.parent / "draft_model.pt"
+            if draft_path.exists():
+                draft_model.load_state_dict(torch.load(draft_path, map_location=device))
+                print("Draft model loaded from artifacts.")
+            else:
+                print("Draft model initialized (using random weights for demo).")
+                
             draft_model.to(device)
             draft_model.eval()
-            print("Draft model initialized (using random weights for demo).")
         except Exception as e:
             print(f"Error loading draft model: {e}")
             
