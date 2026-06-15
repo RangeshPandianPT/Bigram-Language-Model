@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import torch
 import uvicorn
@@ -11,6 +12,8 @@ from llm.model import GPTLanguageModel
 from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 from llm.rag import DocumentLoader, TextChunker, VectorStore
 from scripts.speculative_decode import speculative_decode
+from llm.agent import Agent, Tool
+from scripts.agent_chat import evaluate_math, search_wikipedia
 
 # Global variables to hold our model and tokenizer
 model = None
@@ -92,6 +95,9 @@ class GenerateRequest(BaseModel):
 
 class IngestRequest(BaseModel):
     doc_dir: str
+
+class AgentRequest(BaseModel):
+    prompt: str
 
 class GenerateResponse(BaseModel):
     prompt: str
@@ -194,6 +200,66 @@ def generate_text(request: GenerateRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating text: {str(e)}")
+
+@app.post("/generate_stream")
+def generate_text_stream(request: GenerateRequest):
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=503, detail="Model is not loaded yet or failed to load.")
+        
+    try:
+        final_prompt = request.prompt
+        
+        # 1. RAG Context Retrieval
+        if request.use_rag and vector_store is not None and request.prompt:
+            results = vector_store.search(request.prompt, top_k=3)
+            context_str = ""
+            for res in results:
+                context_str += f"{res['content']}\n\n"
+            
+            if context_str:
+                final_prompt = (
+                    "Use the following pieces of context to answer the question at the end.\n"
+                    "If you don't know the answer, just say that you don't know.\n\n"
+                    f"Context:\n{context_str}\n"
+                    f"Question: {request.prompt}\n"
+                    "Answer:"
+                )
+                
+        if final_prompt:
+            prompt_ids = tokenizer.encode(final_prompt)
+            context = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+        else:
+            context = torch.zeros((1, 1), dtype=torch.long, device=device)
+            
+        def event_stream():
+            for idx_next in model.generate_stream(
+                context, 
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_k=request.top_k,
+                top_p=request.top_p,
+                repetition_penalty=request.repetition_penalty
+            ):
+                word = tokenizer.decode([idx_next.item()])
+                yield f"data: {word}\n\n"
+            yield "data: [DONE]\n\n"
+            
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating stream: {str(e)}")
+
+@app.post("/agent_chat")
+def agent_chat_endpoint(request: AgentRequest):
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=503, detail="Model is not loaded yet or failed to load.")
+        
+    tools = [
+        Tool("Calculator", "Evaluates basic math expressions", evaluate_math),
+        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia)
+    ]
+    agent = Agent(model, tokenizer, device, tools=tools)
+    response = agent.run(request.prompt)
+    return {"response": response}
 
 # This allows running the file directly
 if __name__ == "__main__":
