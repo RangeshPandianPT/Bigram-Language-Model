@@ -1,34 +1,35 @@
 import torch
 import torch.nn as nn
+from transformers import CLIPVisionModel
 from llm.config import GPTConfig
 from llm.model import GPTLanguageModel
 
 class VisionEncoder(nn.Module):
-    """ Dummy vision encoder (e.g. CLIP substitute) """
-    def __init__(self, hidden_dim: int = 512):
+    """ Real Vision encoder using CLIP """
+    def __init__(self, hidden_dim: int = 768, model_name: str = "openai/clip-vit-base-patch32"):
         super().__init__()
-        # In reality, this would be a ResNet or ViT
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
-        self.flatten = nn.Flatten()
-        # Assume 224x224 image -> 56x56 -> 3136 * 64 -> map to hidden_dim sequence
-        # For simplicity, let's just make it a linear layer that projects the whole image to a single embedding sequence
-        self.proj = nn.Linear(64 * 56 * 56, hidden_dim * 16) # 16 image patches/tokens
+        self.clip = CLIPVisionModel.from_pretrained(model_name)
+        # Freeze CLIP by default
+        for param in self.clip.parameters():
+            param.requires_grad = False
         self.hidden_dim = hidden_dim
+        # Map CLIP's hidden size (768) to VLM hidden_dim if different
+        if self.clip.config.hidden_size != hidden_dim:
+            self.proj = nn.Linear(self.clip.config.hidden_size, hidden_dim)
+        else:
+            self.proj = nn.Identity()
 
     def forward(self, x):
         # x: (B, 3, 224, 224)
-        B = x.size(0)
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = self.flatten(x)
+        outputs = self.clip(pixel_values=x)
+        # outputs.last_hidden_state is (B, num_patches + 1, hidden_size)
+        x = outputs.last_hidden_state
         x = self.proj(x)
-        x = x.view(B, 16, self.hidden_dim) # (B, num_image_tokens, vision_dim)
         return x
 
 class VLM(nn.Module):
     """ Vision-Language Model combining VisionEncoder and GPTLanguageModel """
-    def __init__(self, config: GPTConfig, vision_dim: int = 512):
+    def __init__(self, config: GPTConfig, vision_dim: int = 768):
         super().__init__()
         self.config = config
         
