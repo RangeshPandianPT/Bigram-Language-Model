@@ -377,3 +377,47 @@ class GPTLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
+
+    @torch.no_grad()
+    def generate_stream(self, idx, max_new_tokens, temperature=1.0, top_k=0, top_p=1.0, min_p=0.0, repetition_penalty=1.0):
+        past_key_values = None
+        
+        for _ in range(max_new_tokens):
+            if past_key_values is not None:
+                idx_cond = idx[:, -1:]
+            else:
+                idx_cond = idx[:, -self.config.block_size:] 
+                
+            logits, _, past_key_values = self(idx_cond, past_key_values=past_key_values)
+            logits = logits[:, -1, :] 
+            
+            if repetition_penalty != 1.0:
+                for token_id in set(idx[0].tolist()):
+                    logits[0, token_id] /= repetition_penalty
+            
+            logits = logits / temperature
+            
+            if top_k > 0:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf')
+            
+            if min_p > 0.0:
+                probs = F.softmax(logits, dim=-1)
+                max_probs = probs.max(dim=-1, keepdim=True).values
+                tokens_to_remove = probs < (min_p * max_probs)
+                logits[tokens_to_remove] = -float('Inf')
+            
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                logits[indices_to_remove] = -float('Inf')
+            
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            
+            idx = torch.cat((idx, idx_next), dim=1)
+            yield idx_next
