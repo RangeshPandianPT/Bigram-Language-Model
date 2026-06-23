@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed import init_process_group, destroy_process_group
 import numpy as np
+import os
 import math
 
 from scripts._bootstrap import ROOT_DIR
@@ -82,16 +85,34 @@ def train(model=None, train_config=None, gpt_config=None):
     train_data = np.memmap(TRAIN_BIN_PATH, dtype=np.uint16, mode='r')
     val_data = np.memmap(VAL_BIN_PATH, dtype=np.uint16, mode='r')
     
+    # Setup DDP
+    ddp = int(os.environ.get('RANK', -1)) != -1
+    if ddp:
+        init_process_group(backend='nccl' if torch.cuda.is_available() and os.name != 'nt' else 'gloo')
+        ddp_rank = int(os.environ['RANK'])
+        ddp_local_rank = int(os.environ['LOCAL_RANK'])
+        ddp_world_size = int(os.environ['WORLD_SIZE'])
+        device = f'cuda:{ddp_local_rank}'
+        torch.cuda.set_device(device)
+        master_process = ddp_rank == 0
+    else:
+        master_process = True
+        device = train_config.device
+        ddp_world_size = 1
+        ddp_local_rank = 0
+
     # Initialize model
     if model is None:
         model = GPTLanguageModel(gpt_config)
     
-    if torch.cuda.device_count() > 1:
-        print(f"Let's use {torch.cuda.device_count()} GPUs!")
+    model.to(device)
+    
+    if ddp:
+        model = DDP(model, device_ids=[ddp_local_rank])
+    elif torch.cuda.device_count() > 1:
+        print(f"Let's use {torch.cuda.device_count()} GPUs with DataParallel!")
         model = nn.DataParallel(model)
         
-    model.to(train_config.device)
-    
     # Optimizer with weight decay
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -102,9 +123,10 @@ def train(model=None, train_config=None, gpt_config=None):
     # Mixed precision training
     scaler = torch.cuda.amp.GradScaler(enabled=train_config.use_amp)
     
-    print(f"Training on {train_config.device}")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
-    print(f"Mixed precision: {train_config.use_amp}")
+    if master_process:
+        print(f"Training on {device} (DDP: {ddp}, World Size: {ddp_world_size})")
+        print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
+        print(f"Mixed precision: {train_config.use_amp}")
     
     best_val_loss = float('inf')
     
@@ -116,22 +138,24 @@ def train(model=None, train_config=None, gpt_config=None):
         
         # Evaluate periodically
         if iter % train_config.eval_interval == 0 or iter == train_config.max_iters - 1:
-            losses = estimate_loss(model, train_data, val_data, train_config)
-            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, "
-                  f"train ppl {losses['train_perplexity']:.2f}, val ppl {losses['val_perplexity']:.2f}, lr {lr:.6f}")
-            
-            # Save best model
-            if losses['val'] < best_val_loss:
-                best_val_loss = losses['val']
-                model_to_save = model.module if hasattr(model, 'module') else model
-                torch.save(model_to_save.state_dict(), MODEL_BEST_PATH)
-                print(f"Saved best model with val loss {best_val_loss:.4f}")
+            if master_process:
+                losses = estimate_loss(model, train_data, val_data, train_config)
+                print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, "
+                      f"train ppl {losses['train_perplexity']:.2f}, val ppl {losses['val_perplexity']:.2f}, lr {lr:.6f}")
+                
+                # Save best model
+                if losses['val'] < best_val_loss:
+                    best_val_loss = losses['val']
+                    model_to_save = model.module if hasattr(model, 'module') else model
+                    torch.save(model_to_save.state_dict(), MODEL_BEST_PATH)
+                    print(f"Saved best model with val loss {best_val_loss:.4f}")
         
         # Sample a batch of data
-        ix = torch.randint(len(train_data) - model.config.block_size, (train_config.batch_size,))
-        x = torch.stack([torch.from_numpy((train_data[i:i+model.config.block_size]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((train_data[i+1:i+1+model.config.block_size]).astype(np.int64)) for i in ix])
-        x, y = x.to(train_config.device), y.to(train_config.device)
+        block_size = model.module.config.block_size if hasattr(model, 'module') else model.config.block_size
+        ix = torch.randint(len(train_data) - block_size, (train_config.batch_size,))
+        x = torch.stack([torch.from_numpy((train_data[i:i+block_size]).astype(np.int64)) for i in ix])
+        y = torch.stack([torch.from_numpy((train_data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+        x, y = x.to(device), y.to(device)
         
         # Forward pass with mixed precision
         with torch.cuda.amp.autocast(enabled=train_config.use_amp):
@@ -150,11 +174,15 @@ def train(model=None, train_config=None, gpt_config=None):
         scaler.step(optimizer)
         scaler.update()
     
-    # Save final model
-    model_to_save = model.module if hasattr(model, 'module') else model
-    torch.save(model_to_save.state_dict(), MODEL_PATH)
-    print("Training complete!")
-    print(f"Best validation loss: {best_val_loss:.4f}")
+    if master_process:
+        # Save final model
+        model_to_save = model.module if hasattr(model, 'module') else model
+        torch.save(model_to_save.state_dict(), MODEL_PATH)
+        print("Training complete!")
+        print(f"Best validation loss: {best_val_loss:.4f}")
+        
+    if ddp:
+        destroy_process_group()
 
 if __name__ == "__main__":
     train()
