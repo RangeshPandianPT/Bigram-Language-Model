@@ -92,22 +92,21 @@ def generate_text(
         if idx.shape[1] > config.block_size:
             idx = idx[:, -config.block_size:]
 
-        output_ids = model.generate(
+        for next_token in model.generate_stream(
             idx,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_k=top_k if top_k > 0 else 0,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
-        )
-
-        full_text = tokenizer.decode(output_ids[0].tolist())
-        # Highlight the generated part
-        generated_only = tokenizer.decode(output_ids[0, len(tokens):].tolist())
-        return f"{prompt}[GENERATED:]{generated_only}"
+        ):
+            idx = torch.cat((idx, next_token), dim=1)
+            # Highlight the generated part
+            generated_only = tokenizer.decode(idx[0, len(tokens):].tolist())
+            yield f"{prompt}[GENERATED:]{generated_only}"
 
     except Exception as e:
-        return f"❌ Error during generation: {e}"
+        yield f"❌ Error during generation: {e}"
 
 @torch.no_grad()
 def generate_rag(prompt: str, max_new_tokens: int, temperature: float, top_p: float):
@@ -126,12 +125,12 @@ def generate_rag(prompt: str, max_new_tokens: int, temperature: float, top_p: fl
         tokens = tokenizer.encode(full_prompt)
         idx = torch.tensor([tokens], dtype=torch.long, device=DEVICE)
         
-        output_ids = model.generate(idx, max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p)
-        generated_only = tokenizer.decode(output_ids[0, len(tokens):].tolist())
-        
-        return f"**Context Retrieved:**\n{context_str}\n\n**Answer:**\n{generated_only.strip()}"
+        for next_token in model.generate_stream(idx, max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p):
+            idx = torch.cat((idx, next_token), dim=1)
+            generated_only = tokenizer.decode(idx[0, len(tokens):].tolist())
+            yield f"**Context Retrieved:**\n{context_str}\n\n**Answer:**\n{generated_only.strip()}"
     except Exception as e:
-        return f"❌ Error: {e}"
+        yield f"❌ Error: {e}"
 
 @torch.no_grad()
 def generate_speculative(prompt: str, max_new_tokens: int):
