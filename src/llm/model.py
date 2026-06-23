@@ -68,6 +68,7 @@ class CausalSelfAttention(nn.Module):
         self.n_kv_head = config.n_kv_head
         self.n_embd = config.n_embd
         self.block_size = config.block_size
+        self.sliding_window = getattr(config, 'sliding_window', None)
         
         # Checking if GQA is valid
         assert self.n_head % self.n_kv_head == 0, "n_head must be divisible by n_kv_head"
@@ -119,13 +120,24 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention
         # Flash Attention using PyTorch 2.0 SDPA
         if past_kv is None:
-            # Standard causal masking for training/prefill
-            y = F.scaled_dot_product_attention(
-                q, k, v, 
-                attn_mask=None, 
-                dropout_p=self.dropout.p if self.training else 0.0, 
-                is_causal=True
-            )
+            if self.sliding_window is not None:
+                # Custom mask for Sliding Window Attention
+                mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=q.device))
+                mask = torch.triu(mask, diagonal=-self.sliding_window + 1)
+                y = F.scaled_dot_product_attention(
+                    q, k, v, 
+                    attn_mask=mask, 
+                    dropout_p=self.dropout.p if self.training else 0.0, 
+                    is_causal=False
+                )
+            else:
+                # Standard causal masking for training/prefill
+                y = F.scaled_dot_product_attention(
+                    q, k, v, 
+                    attn_mask=None, 
+                    dropout_p=self.dropout.p if self.training else 0.0, 
+                    is_causal=True
+                )
         else:
             # During generation with cache, query shape is (B, nh, 1, hs), we attend to all keys (B, nh, T_past+1, hs)
             # No causal mask needed as we just want the output for the 1 new token attending to everything before and including it

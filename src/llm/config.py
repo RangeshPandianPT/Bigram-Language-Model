@@ -24,6 +24,9 @@ class GPTConfig:
     
     # Weight Tying
     tie_word_embeddings: bool = False
+    
+    # Mistral Sliding Window Attention
+    sliding_window: int = None
 
     def __post_init__(self):
         if self.n_kv_head is None:
