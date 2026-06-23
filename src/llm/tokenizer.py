@@ -102,3 +102,32 @@ class BPETokenizer:
                 idx = 256 + i
                 self.merges[(p0, p1)] = idx
                 self.vocab[idx] = self.vocab[p0] + self.vocab[p1]
+
+
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
+class TiktokenWrapper:
+    def __init__(self, encoding_name="cl100k_base"):
+        if tiktoken is None:
+            raise ImportError("Please install tiktoken: pip install tiktoken")
+        self.tokenizer = tiktoken.get_encoding(encoding_name)
+        # Mock vocab dictionary so len(tokenizer.vocab) returns the correct size
+        self.vocab = {i: b"" for i in range(self.tokenizer.n_vocab)}
+        
+    def train(self, text, vocab_size, verbose=False):
+        print("TiktokenWrapper: training is a no-op (uses pre-trained encoding).")
+
+    def encode(self, text):
+        return self.tokenizer.encode(text)
+
+    def decode(self, ids):
+        return self.tokenizer.decode(ids)
+
+    def save(self, file_prefix):
+        pass # Pre-trained
+
+    def load(self, file_prefix):
+        pass # Pre-trained
