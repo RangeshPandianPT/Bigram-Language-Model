@@ -12,16 +12,20 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 - **RoPE** (Rotary Positional Embeddings): Replaces absolute positional embeddings for better generalization to longer sequences.
 - **SwiGLU** (SiLU Gated Linear Unit): A more powerful activation function in the FeedForward network.
 - **Grouped Query Attention (GQA)**: Optimizes inference memory by sharing Key/Value heads across multiple Query heads (Llama 2/3 style).
+- **Mistral Sliding Window Attention (SWA)**: Restricts attention to local window for massive memory reduction.
 - **Mixture of Experts (MoE)**: Sparse routing mechanism for drastically increasing parameter count with constant compute (Mixtral 8x-style).
 
 ### 🛠️ Engineering
 - **Modular Codebase**: Separated into `config.py`, `model.py`, `train.py`, `tokenizer.py`.
+- **Distributed Data Parallel (DDP)**: Training scale-up across multiple GPUs using PyTorch DDP.
 - **Mixed Precision Training**: Implemented via `torch.amp` for faster training on modern GPUs.
 - **KV Cache**: Efficient O(N) generation inference.
+- **Token Streaming**: Dynamic text generation streaming in the Gradio web UI.
 - **Efficient Data Loading**: Uses `numpy.memmap` for handling datasets larger than RAM.
 
 ### 🧠 Tokenization
 - Uses a custom BPE (Byte Pair Encoding) tokenizer trained on the dataset.
+- Optional **TiktokenWrapper** for complete compatibility with OpenAI and Llama-3 massive vocabularies.
 
 ### 🚀 Fine-Tuning & Deployment
 - **LoRA (Low-Rank Adaptation)**: Parameter-efficient fine-tuning script (`train_lora.py`) freezing base weights and injecting rank-decomposed matrices.
