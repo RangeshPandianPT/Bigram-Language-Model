@@ -16,14 +16,16 @@ train_config.batch_size = 32
 
 gpt_config = GPTConfig()
 
+from llm.paths import TOKENIZER_PREFIX, TRAIN_BIN_PATH, VAL_BIN_PATH
+
 # Load tokenizer
 tokenizer = BPETokenizer()
-tokenizer.load("bpe")
+tokenizer.load(str(TOKENIZER_PREFIX))
 gpt_config.vocab_size = len(tokenizer.vocab)
 
 # Load data
-train_data = np.memmap('train.bin', dtype=np.uint16, mode='r')
-val_data = np.memmap('val.bin', dtype=np.uint16, mode='r')
+train_data = np.memmap(str(TRAIN_BIN_PATH), dtype=np.uint16, mode='r')
+val_data = np.memmap(str(VAL_BIN_PATH), dtype=np.uint16, mode='r')
 
 # Initialize model
 model = GPTLanguageModel(gpt_config)
