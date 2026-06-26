@@ -30,7 +30,7 @@ def estimate_loss(model, train_data, val_data, train_config, block_size):
             y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
             x, y = x.to(train_config.device), y.to(train_config.device)
             
-            with torch.cuda.amp.autocast(enabled=train_config.use_amp):
+            with torch.amp.autocast('cuda', enabled=train_config.use_amp):
                 logits, loss, _ = model(x, y)
             losses[k] = loss.item()
         out[split] = losses.mean().item()
@@ -101,7 +101,7 @@ def train_lora():
         weight_decay=train_config.weight_decay
     )
     
-    scaler = torch.cuda.amp.GradScaler(enabled=train_config.use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=train_config.use_amp)
     
     print("Starting LoRA fine-tuning...")
     best_val_loss = float('inf')
@@ -125,7 +125,7 @@ def train_lora():
         y = torch.stack([torch.from_numpy((train_data[i+1:i+1+config.block_size]).astype(np.int64)) for i in ix])
         x, y = x.to(train_config.device), y.to(train_config.device)
         
-        with torch.cuda.amp.autocast(enabled=train_config.use_amp):
+        with torch.amp.autocast('cuda', enabled=train_config.use_amp):
             logits, loss, _ = model(x, y)
             
         optimizer.zero_grad(set_to_none=True)
