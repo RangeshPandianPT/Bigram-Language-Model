@@ -39,7 +39,7 @@ optimizer = torch.optim.AdamW(
 )
 
 # Mixed precision training
-scaler = torch.cuda.amp.GradScaler(enabled=train_config.use_amp)
+scaler = torch.amp.GradScaler('cuda', enabled=train_config.use_amp)
 
 print("=" * 80)
 print("TESTING NEW TRAINING FEATURES")
@@ -74,7 +74,7 @@ for iter in range(train_config.max_iters):
     x, y = x.to(train_config.device), y.to(train_config.device)
     
     # Forward pass with mixed precision
-    with torch.cuda.amp.autocast(enabled=train_config.use_amp):
+    with torch.amp.autocast('cuda', enabled=train_config.use_amp):
         logits, loss, _ = model(x, y)
     
     # Backward pass
