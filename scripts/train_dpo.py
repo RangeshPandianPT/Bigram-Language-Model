@@ -160,7 +160,7 @@ def train_dpo():
         param.requires_grad = False
         
     optimizer = torch.optim.AdamW(policy_model.parameters(), lr=1e-5, weight_decay=0.0)
-    scaler = torch.cuda.amp.GradScaler(enabled=config.use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=config.use_amp)
     
     # Get preference data
     pref_data = load_or_generate_preference_data(tokenizer, num_samples=200, max_len=config.block_size)
@@ -177,7 +177,7 @@ def train_dpo():
             rejected_y = torch.stack([item['rejected_y'] for item in batch]).to(config.device)
             
             # Forward passes
-            with torch.cuda.amp.autocast(enabled=config.use_amp):
+            with torch.amp.autocast('cuda', enabled=config.use_amp):
                 # Policy model
                 pi_chosen_logits, _, _ = policy_model(chosen_x)
                 pi_rejected_logits, _, _ = policy_model(rejected_x)
