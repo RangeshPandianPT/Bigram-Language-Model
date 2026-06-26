@@ -121,7 +121,7 @@ def train(model=None, train_config=None, gpt_config=None):
     )
     
     # Mixed precision training
-    scaler = torch.cuda.amp.GradScaler(enabled=train_config.use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=train_config.use_amp)
     
     if master_process:
         print(f"Training on {device} (DDP: {ddp}, World Size: {ddp_world_size})")
@@ -158,7 +158,7 @@ def train(model=None, train_config=None, gpt_config=None):
         x, y = x.to(device), y.to(device)
         
         # Forward pass with mixed precision
-        with torch.cuda.amp.autocast(enabled=train_config.use_amp):
+        with torch.amp.autocast('cuda', enabled=train_config.use_amp):
             logits, loss, _ = model(x, y)
         
         # Backward pass
