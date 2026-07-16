@@ -13,7 +13,7 @@ from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
 from llm.rag import DocumentLoader, TextChunker, VectorStore
 from scripts.speculative_decode import speculative_decode
 from llm.agent import Agent, Tool
-from scripts.agent_chat import evaluate_math, search_wikipedia
+from scripts.agent_chat import evaluate_math, search_wikipedia, execute_python
 
 # Global variables to hold our model and tokenizer
 model = None
@@ -255,7 +255,8 @@ def agent_chat_endpoint(request: AgentRequest):
         
     tools = [
         Tool("Calculator", "Evaluates basic math expressions", evaluate_math),
-        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia)
+        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia),
+        Tool("PythonREPL", "Executes Python code and returns output", execute_python)
     ]
     agent = Agent(model, tokenizer, device, tools=tools)
     response = agent.run(request.prompt)
