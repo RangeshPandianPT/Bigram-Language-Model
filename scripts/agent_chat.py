@@ -11,6 +11,23 @@ import urllib.request
 import urllib.parse
 import json
 
+import io
+import sys
+import contextlib
+
+def execute_python(code: str):
+    """Executes python code and returns stdout. Use this for math and logic."""
+    code = code.strip("`")
+    if code.startswith("python"): code = code[6:]
+    output = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output):
+            exec(code, globals())
+        res = output.getvalue()
+        return res if res else "Code executed successfully with no output."
+    except Exception as e:
+        return f"Error: {e}"
+
 def evaluate_math(expression):
     # Safe evaluate for basic math
     allowed_chars = "0123456789+-*/(). "
@@ -60,7 +77,8 @@ def main():
     
     tools = [
         Tool("Calculator", "Evaluates basic math expressions", evaluate_math),
-        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia)
+        Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia),
+        Tool("PythonREPL", "Executes Python code and returns output", execute_python)
     ]
     
     agent = Agent(model, tokenizer, device, tools=tools)
