@@ -13,6 +13,8 @@ from llm.tokenizer import BPETokenizer
 from llm.paths import MODEL_BEST_PATH, MODEL_PATH, TOKENIZER_PREFIX
 from llm.rag import DocumentLoader, TextChunker, VectorStore
 from scripts.speculative_decode import speculative_decode
+from llm.agent import Agent, Tool
+from scripts.agent_chat import evaluate_math, search_wikipedia, execute_python
 import time
 
 # ─────────────────────────────────────────────
@@ -157,6 +159,26 @@ def generate_speculative(prompt: str, max_new_tokens: int):
         return f"❌ Error: {e}"
 
 # ─────────────────────────────────────────────
+# Agent Chat function
+# ─────────────────────────────────────────────
+agent_tools = [
+    Tool("Calculator", "Evaluates basic math expressions", evaluate_math),
+    Tool("Wikipedia", "Searches Wikipedia for a given query", search_wikipedia),
+    Tool("PythonREPL", "Executes Python code", execute_python)
+]
+agent = Agent(model, tokenizer, DEVICE, tools=agent_tools)
+
+def agent_chat_fn(prompt: str, history):
+    if not prompt.strip(): return history
+    try:
+        response = agent.run(prompt)
+        history.append((prompt, response))
+        return "", history
+    except Exception as e:
+        history.append((prompt, f"❌ Error: {e}"))
+        return "", history
+
+# ─────────────────────────────────────────────
 # Gradio UI
 # ─────────────────────────────────────────────
 CSS = """
@@ -203,6 +225,13 @@ with gr.Blocks(title="GPT Language Model Demo", theme=gr.themes.Soft(primary_hue
                     spec_output = gr.Textbox(label="Comparison", interactive=False, lines=10)
                     spec_btn = gr.Button("🏎️ Test Speed", variant="primary")
             spec_btn.click(generate_speculative, [spec_prompt, spec_max_tokens], spec_output)
+
+        with gr.TabItem("🤖 Agent Chat"):
+            chatbot = gr.Chatbot(label="Agent (Uses Tools: Python, Wiki, Math)")
+            with gr.Row():
+                agent_prompt = gr.Textbox(show_label=False, placeholder="Ask the agent to calculate, search, or code...", scale=4)
+                agent_btn = gr.Button("Send", variant="primary", scale=1)
+            agent_btn.click(agent_chat_fn, [agent_prompt, chatbot], [agent_prompt, chatbot])
 
 if __name__ == "__main__":
     demo.launch(share=False, server_name="0.0.0.0", server_port=7860)
