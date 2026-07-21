@@ -30,7 +30,10 @@ LORA_WEIGHTS_PATH = CHECKPOINTS_DIR / "lora_weights.pth"
 ONNX_MODEL_PATH = ONNX_DIR / "model.onnx"
 
 EVALUATION_REPORT_PATH = REPORTS_DIR / "evaluation_report.md"
+EVAL_RESULTS_PATH = REPORTS_DIR / "eval_results.json"
 LEAKAGE_REPORT_PATH = REPORTS_DIR / "leakage_report.txt"
+
+TRAINING_METADATA_PATH = CHECKPOINTS_DIR / "training_metadata.json"
 
 
 def ensure_project_dirs() -> None:
