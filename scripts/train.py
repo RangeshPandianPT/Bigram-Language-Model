@@ -10,9 +10,12 @@ from scripts._bootstrap import ROOT_DIR
 from llm.tokenizer import BPETokenizer
 from llm.config import GPTConfig, TrainConfig
 from llm.model import GPTLanguageModel
+from llm.experiment import save_json, set_seed, utc_now_iso
 from llm.paths import (
+    EVAL_RESULTS_PATH,
     MODEL_BEST_PATH,
     MODEL_PATH,
+    TRAINING_METADATA_PATH,
     TOKENIZER_PREFIX,
     TRAIN_BIN_PATH,
     VAL_BIN_PATH,
@@ -23,7 +26,7 @@ from llm.paths import (
 train_config = TrainConfig()
 gpt_config = GPTConfig()
 
-torch.manual_seed(1337)
+set_seed(train_config.seed)
 
 # Load tokenizer
 tokenizer = BPETokenizer()
@@ -72,8 +75,11 @@ def train(model=None, train_config=None, gpt_config=None):
     # Load config
     if train_config is None:
         train_config = TrainConfig()
-    if gpt_config is None and model is None:
-        gpt_config = GPTConfig()
+    if gpt_config is None:
+        gpt_config = getattr(model, 'config', GPTConfig()) if model is not None else GPTConfig()
+
+    if hasattr(train_config, "seed"):
+        set_seed(train_config.seed)
     
     # Load tokenizer
     tokenizer = BPETokenizer()
@@ -127,6 +133,24 @@ def train(model=None, train_config=None, gpt_config=None):
         print(f"Training on {device} (DDP: {ddp}, World Size: {ddp_world_size})")
         print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
         print(f"Mixed precision: {train_config.use_amp}")
+
+        save_json(
+            TRAINING_METADATA_PATH,
+            {
+                "created_at": utc_now_iso(),
+                "seed": train_config.seed,
+                "device": device,
+                "ddp": ddp,
+                "world_size": ddp_world_size,
+                "train_config": train_config,
+                "gpt_config": gpt_config,
+                "tokenizer_vocab_size": len(tokenizer.vocab),
+                "train_data_path": str(TRAIN_BIN_PATH),
+                "val_data_path": str(VAL_BIN_PATH),
+                "best_checkpoint": str(MODEL_BEST_PATH),
+                "final_checkpoint": str(MODEL_PATH),
+            },
+        )
     
     best_val_loss = float('inf')
     
@@ -148,6 +172,17 @@ def train(model=None, train_config=None, gpt_config=None):
                     best_val_loss = losses['val']
                     model_to_save = model.module if hasattr(model, 'module') else model
                     torch.save(model_to_save.state_dict(), MODEL_BEST_PATH)
+                    save_json(
+                        MODEL_BEST_PATH.with_suffix('.meta.json'),
+                        {
+                            "saved_at": utc_now_iso(),
+                            "iteration": iter,
+                            "split_metrics": losses,
+                            "learning_rate": lr,
+                            "seed": train_config.seed,
+                            "checkpoint": str(MODEL_BEST_PATH),
+                        },
+                    )
                     print(f"Saved best model with val loss {best_val_loss:.4f}")
         
         # Sample a batch of data
@@ -178,6 +213,18 @@ def train(model=None, train_config=None, gpt_config=None):
         # Save final model
         model_to_save = model.module if hasattr(model, 'module') else model
         torch.save(model_to_save.state_dict(), MODEL_PATH)
+        save_json(
+            MODEL_PATH.with_suffix('.meta.json'),
+            {
+                "saved_at": utc_now_iso(),
+                "final_iteration": train_config.max_iters - 1,
+                "best_val_loss": best_val_loss,
+                "seed": train_config.seed,
+                "checkpoint": str(MODEL_PATH),
+                "training_metadata": str(TRAINING_METADATA_PATH),
+                "eval_results": str(EVAL_RESULTS_PATH),
+            },
+        )
         print("Training complete!")
         print(f"Best validation loss: {best_val_loss:.4f}")
         
