@@ -9,7 +9,7 @@ from scripts._bootstrap import ROOT_DIR
 from llm.tokenizer import BPETokenizer
 from llm.config import GPTConfig, TrainConfig
 from llm.model import GPTLanguageModel
-from llm.paths import MODEL_PATH, TOKENIZER_PREFIX
+from llm.paths import MODEL_BEST_PATH, MODEL_PATH, TOKENIZER_PREFIX
 from llm.rag import DocumentLoader, TextChunker, VectorStore
 from scripts.speculative_decode import speculative_decode
 from llm.agent import Agent, Tool
@@ -21,7 +21,35 @@ draft_model = None
 tokenizer = None
 device = None
 vector_store = None
-device = None
+
+
+def _load_model_weights(model_instance: GPTLanguageModel, target_device: str) -> str | None:
+    checkpoint_path = MODEL_BEST_PATH if MODEL_BEST_PATH.exists() else MODEL_PATH
+    if not checkpoint_path.exists():
+        return None
+
+    model_instance.load_state_dict(torch.load(checkpoint_path, map_location=target_device))
+    return str(checkpoint_path)
+
+
+def _build_vector_store() -> VectorStore | None:
+    doc_dir = ROOT_DIR / 'data' / 'documents'
+    if not doc_dir.exists():
+        return None
+
+    loader = DocumentLoader()
+    docs = loader.load_directory(str(doc_dir))
+    if not docs:
+        return None
+
+    chunker = TextChunker()
+    chunks = []
+    for doc in docs:
+        chunks.extend(chunker.chunk_document(doc))
+
+    store = VectorStore()
+    store.ingest(chunks)
+    return store
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,17 +68,21 @@ async def lifespan(app: FastAPI):
         model = GPTLanguageModel(gpt_config)
         
         # Load the trained weights
-        model_path = str(MODEL_PATH)
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        model_path = _load_model_weights(model, device)
+        if model_path is None:
+            raise FileNotFoundError("No trained model checkpoint found.")
         model.to(device)
         model.eval()
-        print("Model loaded successfully!")
+        print(f"Model loaded successfully from {model_path}!")
         
         # Initialize Vector Store
         global vector_store
         try:
-            vector_store = VectorStore()
-            print("VectorStore initialized.")
+            vector_store = _build_vector_store()
+            if vector_store is not None:
+                print("VectorStore initialized from data/documents.")
+            else:
+                print("VectorStore not initialized - no documents found.")
         except ImportError as e:
             print(f"VectorStore error: {e}")
             
@@ -117,6 +149,17 @@ def read_health():
         "tokenizer_loaded": tokenizer is not None,
         "vector_store_loaded": vector_store is not None,
         "device": str(device) if device is not None else None,
+        "checkpoint": str(MODEL_BEST_PATH if MODEL_BEST_PATH.exists() else MODEL_PATH),
+    }
+
+
+@app.get("/model-info")
+def read_model_info():
+    return {
+        "checkpoint": str(MODEL_BEST_PATH if MODEL_BEST_PATH.exists() else MODEL_PATH),
+        "device": str(device) if device is not None else None,
+        "has_vector_store": vector_store is not None,
+        "supports_speculative_decoding": draft_model is not None,
     }
 
 @app.post("/ingest")
