@@ -52,6 +52,7 @@ class TrainConfig:
     lr_decay_iters: int = 5000   # aligned with max_iters (was 2000)
     min_lr: float = 3e-5         # Minimum learning rate
     gradient_checkpointing: bool = False # memory savings during training
+    seed: int = 1337
 
 @dataclass
 class SamplingConfig:
