@@ -18,9 +18,20 @@ class RMSNorm(nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, rope_type: str = "default", rope_scale: float = 1.0):
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)
+    if rope_type == "linear" and rope_scale != 1.0:
+        t = torch.arange(end, device=freqs.device).float() / rope_scale
+    elif rope_type == "yarn" and rope_scale != 1.0:
+        t = torch.arange(end, device=freqs.device).float()
+        low_freq_factor = 1.0 / rope_scale
+        dims = torch.arange(0, dim, 2)[: (dim // 2)].float()
+        smooth = torch.clamp((dims - dim * 0.2) / (dim * 0.4), 0.0, 1.0)
+        freq_factor = (1.0 - smooth) * low_freq_factor + smooth * 1.0
+        freqs = freqs * freq_factor
+    else:
+        t = torch.arange(end, device=freqs.device).float()
+
     freqs = torch.outer(t, freqs).float()
     freqs_cos = torch.cos(freqs)
     freqs_sin = torch.sin(freqs)
@@ -69,13 +80,29 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.block_size = config.block_size
         self.sliding_window = getattr(config, 'sliding_window', None)
+        self.use_mla = getattr(config, 'use_mla', False)
         
-        # Checking if GQA is valid
-        assert self.n_head % self.n_kv_head == 0, "n_head must be divisible by n_kv_head"
-        
-        self.q_proj = nn.Linear(config.n_embd, config.n_head * self.head_dim, bias=config.bias)
-        self.k_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
-        self.v_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
+        if self.use_mla:
+            self.kv_lora_rank = getattr(config, 'kv_lora_rank', 64)
+            self.q_lora_rank = getattr(config, 'q_lora_rank', 128)
+            self.rope_head_dim = getattr(config, 'rope_head_dim', 16)
+            self.nope_head_dim = self.head_dim - self.rope_head_dim
+            assert self.nope_head_dim > 0, "head_dim must be greater than rope_head_dim for MLA"
+            
+            self.w_kv_down = nn.Linear(config.n_embd, self.kv_lora_rank, bias=config.bias)
+            self.w_kv_up_k = nn.Linear(self.kv_lora_rank, config.n_head * self.nope_head_dim, bias=config.bias)
+            self.w_kv_up_v = nn.Linear(self.kv_lora_rank, config.n_head * self.head_dim, bias=config.bias)
+            self.w_k_rope = nn.Linear(config.n_embd, config.n_head * self.rope_head_dim, bias=config.bias)
+            
+            self.w_q_down = nn.Linear(config.n_embd, self.q_lora_rank, bias=config.bias)
+            self.w_q_up_nope = nn.Linear(self.q_lora_rank, config.n_head * self.nope_head_dim, bias=config.bias)
+            self.w_q_up_rope = nn.Linear(self.q_lora_rank, config.n_head * self.rope_head_dim, bias=config.bias)
+        else:
+            assert self.n_head % self.n_kv_head == 0, "n_head must be divisible by n_kv_head"
+            self.q_proj = nn.Linear(config.n_embd, config.n_head * self.head_dim, bias=config.bias)
+            self.k_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
+            self.v_proj = nn.Linear(config.n_embd, config.n_kv_head * self.head_dim, bias=config.bias)
+            
         self.c_proj = nn.Linear(config.n_head * self.head_dim, config.n_embd, bias=config.bias)
         
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
@@ -85,43 +112,60 @@ class CausalSelfAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.dropout)
 
     def forward(self, x, freqs_cos, freqs_sin, past_kv=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size()
         
-        # calculate query, key, values
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
-        
-        q = q.view(B, T, self.n_head, self.head_dim) # (B, T, nh, hs)
-        k = k.view(B, T, self.n_kv_head, self.head_dim) # (B, T, n_kv, hs)
-        v = v.view(B, T, self.n_kv_head, self.head_dim) # (B, T, n_kv, hs)
-
-        # Apply RoPE (only to q and k)
-        q, k = apply_rotary_emb(q, k, freqs_cos, freqs_sin)
-        
-        # KV Cache: Concatenate with past keys/values
-        if past_kv is not None:
-            past_k, past_v = past_kv
-            k = torch.cat((past_k, k), dim=1)  # Concatenate on sequence dimension
-            v = torch.cat((past_v, v), dim=1)
+        if self.use_mla:
+            c_kv = self.w_kv_down(x)
+            k_nope = self.w_kv_up_k(c_kv).view(B, T, self.n_head, self.nope_head_dim)
+            v = self.w_kv_up_v(c_kv).view(B, T, self.n_head, self.head_dim)
+            k_rope = self.w_k_rope(x).view(B, T, self.n_head, self.rope_head_dim)
             
-        present_kv = (k, v) # cache the keys/values for next step
-        
-        # GQA: Repeat K/V heads to match Q heads
-        # This is where GQA happens. If n_kv_head < n_head, we repeat the efficient K/V heads
-        k = repeat_kv(k, self.n_head // self.n_kv_head)
-        v = repeat_kv(v, self.n_head // self.n_kv_head)
-        
-        # Transpose for attention: (B, nh, T, hs)
-        k = k.transpose(1, 2) 
-        q = q.transpose(1, 2)
-        v = v.transpose(1, 2)
+            c_q = self.w_q_down(x)
+            q_nope = self.w_q_up_nope(c_q).view(B, T, self.n_head, self.nope_head_dim)
+            q_rope = self.w_q_up_rope(c_q).view(B, T, self.n_head, self.rope_head_dim)
+            
+            q_rope, k_rope = apply_rotary_emb(q_rope, k_rope, freqs_cos, freqs_sin)
+            
+            q = torch.cat([q_nope, q_rope], dim=-1)
+            k = torch.cat([k_nope, k_rope], dim=-1)
+            
+            if past_kv is not None:
+                past_k, past_v = past_kv
+                k = torch.cat((past_k, k), dim=1)
+                v = torch.cat((past_v, v), dim=1)
+                
+            present_kv = (k, v)
+            
+            k = k.transpose(1, 2)
+            q = q.transpose(1, 2)
+            v = v.transpose(1, 2)
+        else:
+            q = self.q_proj(x)
+            k = self.k_proj(x)
+            v = self.v_proj(x)
+            
+            q = q.view(B, T, self.n_head, self.head_dim)
+            k = k.view(B, T, self.n_kv_head, self.head_dim)
+            v = v.view(B, T, self.n_kv_head, self.head_dim)
 
-        # causal self-attention
-        # Flash Attention using PyTorch 2.0 SDPA
+            q, k = apply_rotary_emb(q, k, freqs_cos, freqs_sin)
+            
+            if past_kv is not None:
+                past_k, past_v = past_kv
+                k = torch.cat((past_k, k), dim=1)
+                v = torch.cat((past_v, v), dim=1)
+                
+            present_kv = (k, v)
+            
+            k = repeat_kv(k, self.n_head // self.n_kv_head)
+            v = repeat_kv(v, self.n_head // self.n_kv_head)
+            
+            k = k.transpose(1, 2) 
+            q = q.transpose(1, 2)
+            v = v.transpose(1, 2)
+
         if past_kv is None:
             if self.sliding_window is not None:
-                # Custom mask for Sliding Window Attention
                 mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=q.device))
                 mask = torch.triu(mask, diagonal=-self.sliding_window + 1)
                 y = F.scaled_dot_product_attention(
@@ -131,7 +175,6 @@ class CausalSelfAttention(nn.Module):
                     is_causal=False
                 )
             else:
-                # Standard causal masking for training/prefill
                 y = F.scaled_dot_product_attention(
                     q, k, v, 
                     attn_mask=None, 
@@ -139,8 +182,6 @@ class CausalSelfAttention(nn.Module):
                     is_causal=True
                 )
         else:
-            # During generation with cache, query shape is (B, nh, 1, hs), we attend to all keys (B, nh, T_past+1, hs)
-            # No causal mask needed as we just want the output for the 1 new token attending to everything before and including it
             y = F.scaled_dot_product_attention(
                 q, k, v, 
                 attn_mask=None, 
@@ -148,9 +189,7 @@ class CausalSelfAttention(nn.Module):
                 is_causal=False
             )
             
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-        
-        # output projection
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.resid_dropout(self.c_proj(y))
         return y, present_kv
 
@@ -173,11 +212,12 @@ class FeedForward(nn.Module):
         return self.dropout(self.w3(F.silu(self.w1(x)) * self.w2(x)))
 
 class MoEBlock(nn.Module):
-    """ Mixture of Experts (MoE) block replacing FeedForward """
+    """ Mixture of Experts (MoE) block with optional DeepSeek-style Shared Experts """
     def __init__(self, config: GPTConfig):
         super().__init__()
         self.n_experts = config.n_experts
         self.num_experts_per_tok = config.num_experts_per_tok
+        self.n_shared_experts = getattr(config, 'n_shared_experts', 0)
         
         # Gate network to compute routing probabilities
         self.gate = nn.Linear(config.n_embd, self.n_experts, bias=False)
@@ -185,10 +225,20 @@ class MoEBlock(nn.Module):
         # Expert networks
         self.experts = nn.ModuleList([FeedForward(config) for _ in range(self.n_experts)])
         
+        # Dedicated shared experts processed for all tokens
+        if self.n_shared_experts > 0:
+            self.shared_experts = nn.ModuleList([FeedForward(config) for _ in range(self.n_shared_experts)])
+        
     def forward(self, x):
         # x shape: (B, T, C)
         orig_shape = x.shape
         x_flat = x.view(-1, orig_shape[-1]) # (B*T, C)
+        
+        # Shared experts output (processed for every token)
+        shared_output = 0.0
+        if self.n_shared_experts > 0:
+            for expert in self.shared_experts:
+                shared_output = shared_output + expert(x)
         
         # Get routing logits
         router_logits = self.gate(x_flat) # (B*T, n_experts)
@@ -201,41 +251,33 @@ class MoEBlock(nn.Module):
         
         # Normalize routing weights so they sum to 1 over the selected top-k
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-        # Cast back to input dtype
         routing_weights = routing_weights.to(x.dtype)
         
         final_hidden_states = torch.zeros_like(x_flat)
         
         # One-hot encode the selected experts to create masks: (B*T, top_k, n_experts)
         expert_mask = F.one_hot(selected_experts, num_classes=self.n_experts).permute(2, 1, 0)
-        # shape: (n_experts, top_k, B*T)
         
         for expert_idx in range(self.n_experts):
             expert_layer = self.experts[expert_idx]
-            
-            # Find tokens routed to this expert
             idx, top_x = torch.where(expert_mask[expert_idx])
             
             if top_x.shape[0] == 0:
                 continue
                 
-            # Extract tokens for this expert
-            top_x_list = top_x.tolist() # Token indices in sequence (B*T)
-            idx_list = idx.tolist()     # Index in the top_k dimension (0, 1)
+            top_x_list = top_x.tolist()
+            idx_list = idx.tolist()
             
-            # Get hidden states for these tokens
-            current_state = x_flat[top_x_list] # (num_tokens_for_expert, C)
-            
-            # Forward pass through the expert
+            current_state = x_flat[top_x_list]
             current_hidden_states = expert_layer(current_state)
-            
-            # Weight the output by routing probability
             current_hidden_states = current_hidden_states * routing_weights[top_x_list, idx_list, None]
             
-            # Scatter back into the final result
             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(x.dtype))
             
-        return final_hidden_states.view(orig_shape)
+        routed_out = final_hidden_states.view(orig_shape)
+        if self.n_shared_experts > 0:
+            return routed_out + shared_output
+        return routed_out
 
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
@@ -271,10 +313,19 @@ class GPTLanguageModel(nn.Module):
             self.lm_head.weight = self.token_embedding_table.weight
         
         # Precompute RoPE frequencies
-        head_dim = config.n_embd // config.n_head
-        freqs_cos, freqs_sin = precompute_freqs_cis(head_dim, config.block_size)
+        head_dim = (
+            config.rope_head_dim 
+            if getattr(config, 'use_mla', False) 
+            else config.n_embd // config.n_head
+        )
+        rope_type = getattr(config, 'rope_type', 'default')
+        rope_scale = getattr(config, 'rope_scale', 1.0)
+        freqs_cos, freqs_sin = precompute_freqs_cis(
+            head_dim, config.block_size, rope_type=rope_type, rope_scale=rope_scale
+        )
         self.register_buffer("freqs_cos", freqs_cos)
         self.register_buffer("freqs_sin", freqs_sin)
+
 
     def forward(self, idx, targets=None, past_key_values=None):
         B, T = idx.shape
