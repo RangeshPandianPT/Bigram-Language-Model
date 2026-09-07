@@ -16,6 +16,18 @@ class GPTConfig:
     # MoE Config
     n_experts: int = 0            # 0 = MoE disabled. > 0 = Number of experts
     num_experts_per_tok: int = 2  # Number of experts to route each token to
+    n_shared_experts: int = 0     # DeepSeek-style shared experts processed for all tokens
+
+    # Multi-Head Latent Attention (MLA) Config
+    use_mla: bool = False         # DeepSeek-style compressed KV attention
+    kv_lora_rank: int = 64        # Latent KV compression rank
+    q_lora_rank: int = 128        # Latent Q compression rank
+    rope_head_dim: int = 16       # Decoupled RoPE head dimension for MLA
+
+    # RoPE Scaling Config (Linear & YaRN)
+    rope_type: str = "default"    # "default", "linear", or "yarn"
+    rope_scale: float = 1.0       # Context length scaling factor
+    original_max_position_embeddings: int = 128
 
     # LoRA Config
     lora_rank: int = 0            # 0 = LoRA disabled. >0 = LoRA enabled
@@ -29,7 +41,7 @@ class GPTConfig:
     sliding_window: int = None
 
     def __post_init__(self):
-        if self.n_kv_head is None:
+        if self.n_kv_head is None or self.n_kv_head > self.n_head or self.n_head % self.n_kv_head != 0:
             self.n_kv_head = self.n_head
         assert self.n_head % self.n_kv_head == 0, \
             f"n_head ({self.n_head}) must be divisible by n_kv_head ({self.n_kv_head})"
