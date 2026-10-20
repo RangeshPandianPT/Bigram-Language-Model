@@ -27,16 +27,21 @@ To understand modern LLM internals by building them from scratch in PyTorch. Thi
 - Uses a custom BPE (Byte Pair Encoding) tokenizer trained on the dataset.
 - Optional **TiktokenWrapper** for complete compatibility with OpenAI and Llama-3 massive vocabularies.
 
-### 🚀 Fine-Tuning & Deployment
+### 🚀 Fine-Tuning, Alignment & Reasoning
 - **LoRA (Low-Rank Adaptation)**: Parameter-efficient fine-tuning script (`train_lora.py`) freezing base weights and injecting rank-decomposed matrices.
-- **Alignment (DPO / ORPO)**: Scripts (`train_dpo.py`, `train_orpo.py`) to align models with human preferences using Direct Preference Optimization or the memory-efficient Odds Ratio Preference Optimization.
+- **Preference Alignment (DPO / ORPO)**: Scripts (`train_dpo.py`, `train_orpo.py`) to align models with human preferences using Direct Preference Optimization or the reference-model-free Odds Ratio Preference Optimization.
+- **Reasoning Post-Training (DeepSeek-R1 GRPO)**: Reinforcement learning script (`train_grpo.py`) and module (`src/llm/grpo.py`) implementing Group Relative Policy Optimization. Replaces PPO's critic network with group-normalized advantages and rule-based verifiers (format `<think>`, accuracy, length).
 - **ONNX Export**: Script (`export_onnx.py`) to export the PyTorch model for efficient cross-platform and edge device inference.
+
 ## 📂 File Structure
 
 | File | Purpose |
 | --- | --- |
-| `model.py` | Core Transformer: RMSNorm, RoPE, GQA, SwiGLU, KV Cache |
+| `model.py` | Core Transformer: RMSNorm, RoPE, GQA, SwiGLU, KV Cache, MoE, MLA |
 | `train.py` | Training loop with AMP, LR scheduling, gradient clipping |
+| `train_grpo.py` | DeepSeek-R1 style Group Relative Policy Optimization for reasoning |
+| `train_orpo.py` | Reference-model-free Odds Ratio Preference Optimization |
+| `train_dpo.py` | Direct Preference Optimization pipeline |
 | `config.py` | GPTConfig, TrainConfig, SamplingConfig dataclasses |
 | `generate.py` | CLI inference with advanced sampling |
 | `app.py` | 🌐 Gradio web demo |
@@ -90,9 +95,11 @@ Then open [http://localhost:7860](http://localhost:7860) in your browser.
 ## 🧪 Testing & Evaluation
 
 ```bash
-python test_gqa.py        # GQA correctness: KV param reduction + output shape
-python test_kv_cache.py   # KV Cache: verify cached == uncached outputs + speedup
-python test_new_features.py  # Mixed precision, sampling strategies, LR scheduler
+pytest tests/test_grpo.py     # DeepSeek-R1 GRPO loss, advantage normalization & rewards
+pytest tests/test_orpo.py     # Odds Ratio Preference Optimization loss & step
+pytest tests/test_dpo.py      # Direct Preference Optimization loss & gradients
+pytest tests/test_gqa.py      # GQA correctness: KV param reduction + output shape
+pytest tests/test_kv_cache.py # KV Cache: verify cached == uncached outputs + speedup
 ```
 
 ### Model Benchmarks
