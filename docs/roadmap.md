@@ -143,3 +143,22 @@ Now that the core LLM, fine-tuning pipeline, and deployment are complete, the pr
 ### Path E: Automated Benchmarking & Eval Suite ✅
 - **Goal:** Scientifically measure the model's intelligence and track regressions.
 - **Tasks:** ✅ Integrated standard benchmarks (PIQA, MMLU, ARC Challenge, TruthfulQA) in `scripts/eval/run_evals.py` to automatically evaluate the model's capabilities.
+
+---
+
+## 🚀 Level 8: Reasoning & Reinforcement Learning (DeepSeek-R1 GRPO) ✅ COMPLETED
+
+The modern frontier of LLM development shifts focus from pure pretraining to post-training reinforcement learning that incentivizes long-form reasoning, reflection, and test-time compute.
+
+### 1. Group Relative Policy Optimization (GRPO) ✅
+- **Why:** Replaces traditional PPO by eliminating the memory-hungry Critic/Value model. Instead, it computes relative baselines across a group of sampled rollouts for each prompt:
+  $$A_i = \frac{R_i - \text{mean}(\{R_1, \dots, R_G\})}{\text{std}(\{R_1, \dots, R_G\}) + \epsilon}$$
+- **Status:** ✅ Implemented in `src/llm/grpo.py` and `train_grpo.py` with unit tests in `tests/test_grpo.py`.
+
+### 2. Multi-Objective Rule-Based Reward Verifiers ✅
+- **Format Verifier:** Rewards structured reasoning using `<think>...</think><answer>...</answer>` tags.
+- **Accuracy Verifier:** Compares extracted final answers against exact or numeric ground truth without a trained reward model.
+- **Reasoning Length Verifier:** Encourages exploratory thinking while penalizing empty or runaway generation loops.
+
+### 3. Clipped Surrogate Objective with Schulman KL Penalty ✅
+- Optimized with per-token probability ratios $\frac{\pi_\theta(x_t)}{\pi_{\text{old}}(x_t)}$, PPO-style clipping bounds $[1-\epsilon, 1+\epsilon]$, and unbiased per-token KL divergence regularization against a frozen reference model.
